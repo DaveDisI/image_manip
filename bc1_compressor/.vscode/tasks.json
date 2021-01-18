@@ -1,0 +1,17 @@
+{
+    // See https://go.microsoft.com/fwlink/?LinkId=733558
+    // for the documentation about the tasks.json format
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "win_build",
+            "type": "shell",
+            "command": "\"C:\\Program Files (x86)\\Microsoft Visual Studio\\2019\\Community\\VC\\Auxiliary\\Build\\vcvarsall\" x64 && cl /ZI ${workspaceFolder}/bc1_compressor.cpp",
+        },
+        {
+            "label": "win_run",
+            "type": "shell",
+            "command": "${workspaceFolder}/bc1_compressor",
+        }
+    ]
+}
