@@ -1,0 +1,147 @@
+<html>
+    <canvas id='canid'>
+
+    </canvas>
+
+    <script>
+        class vec {
+            constructor(){
+                this.x;
+                this.y;
+            }
+        }
+
+        var can;
+        var g;
+        
+        var p1;
+        var p2;
+        var cp;
+        var mp;
+        var t0;
+        var t1;
+        var t2;
+
+        var xp0;
+        var xp1;
+
+        var selectedPoint;
+        var mouseDown = false;
+        var dotSize = 15;
+        var ht;
+
+        window.onload = function(){
+            window.addEventListener("mousedown", mousePressed);
+            window.addEventListener("mouseup", mouseReleased);
+            window.addEventListener("mousemove", mouseMoved);
+            can = document.getElementById('canid');
+            g = can.getContext("2d");
+
+            p1 = new vec();
+            p2 = new vec();
+            cp = new vec();
+            mp = new vec();
+            p1.x = 100;
+            p1.y = 200;
+            p2.x = 300;
+            p2.y = 400;
+            cp.x = 500;
+            cp.y = 300;
+
+            updateCanvas();
+        }
+
+        function distance(v1, v2){
+            let dx = v2.x - v1.x;
+            let dy = v2.y - v1.y;
+            return Math.sqrt(dx * dx + dy + dy);
+        }
+
+        function mousePressed(event){
+            mp.x = event.offsetX;
+            mp.y = ht - event.offsetY;
+            if(distance(mp, p1) < dotSize){
+                selectedPoint = p1;
+            }else if(distance(mp, p2) < dotSize){
+                selectedPoint = p2;
+            }else if(distance(mp, cp) < dotSize){
+                selectedPoint = cp;
+            }
+            mouseDown = true;
+        }
+        function mouseReleased(event){
+            selectedPoint = null;
+            mouseDown = false;
+        }
+
+        function mouseMoved(event){
+            if(mouseDown){
+                if(selectedPoint){
+                    selectedPoint.x = event.offsetX;
+                    selectedPoint.y = ht - event.offsetY;
+                    updateCanvas();
+                    return;
+                }
+                let a = p1.y;
+                let b = p2.y;
+                let c = cp.y;
+                let y = ht - event.offsetY;
+                if(a + b != 2 * c){
+                    let rt = Math.sqrt(-a * b + a * y + b * y + c * c - 2 * c * y);
+                    let denom = a + b - 2 * c;
+                    t0 = -(rt - a + c) / (a + b - 2 * c);
+                    t1 = (rt + a - c) / (a + b - 2 * c);
+                    if((t0 > 0 && t0 < 1) || (t1 > 0 && t1 < 1)){
+                        xp0 = (((1 - t0) * (1 - t0)) * p1.x) + ((2 * t0) * (1 - t0) * cp.x) + (t0 * t0 * p2.x);
+                        xp1 = (((1 - t1) * (1 - t1)) * p1.x) + ((2 * t1) * (1 - t1) * cp.x) + (t1 * t1 * p2.x);
+                    }
+                }
+                else if(b != c && a == 2 * c - b){
+                    t2 = (b - 2 * c + y) / (2 * b - 2 * c);   
+                }
+                
+                updateCanvas();
+            }
+        }
+
+        function updateCanvas(){
+            can.width = window.innerWidth * 0.95;
+            can.height = window.innerHeight * 0.95;
+            ht = can.height; 
+            g.fillStyle = "#0000FF";
+            g.fillRect(0, 0, can.width, can.height);
+            g.beginPath();
+            g.lineWidth = 10;
+            g.bezierCurveTo(p1.x, ht - p1.y, cp.x, ht - cp.y, p2.x, ht - p2.y);
+            g.stroke();
+            g.fillStyle = "#FF0000";
+            g.beginPath();
+            g.ellipse(p1.x, ht - p1.y, dotSize, dotSize, 0, 0, 2 * Math.PI);
+            g.fill();
+            g.fillStyle = "#FF0000";
+            g.beginPath();
+            g.ellipse(p2.x, ht - p2.y, dotSize, dotSize, 0, 0, 2 * Math.PI);
+            g.fill();
+            g.beginPath();
+            g.fillStyle = "#FFFFFF";
+            g.ellipse(cp.x, ht - cp.y, dotSize, dotSize, 0, 0, 2 * Math.PI);
+            g.fill();
+            g.font = "24px Arial";
+
+            g.fillText("P1", p1.x, ht - p1.y);
+            g.fillText("P2", p2.x, ht - p2.y);
+            g.fillText("t0: " + t0, 50, 50);
+            g.fillText("t1: " + t1, 50, 75);
+            g.fillText("t2: " + t2, 50, 100);
+
+            g.fillText("P1.x: " + p1.x, 400, 50);
+            g.fillText("P1.y: " + p1.y, 550, 50);
+            g.fillText("P2.x: " + p2.x, 400, 75);
+            g.fillText("P2.y: " + p2.y, 550, 75);
+            g.fillText("CP.x: " + cp.x, 400, 100);
+            g.fillText("CP.y: " + cp.y, 550, 100);
+            g.fillText("xp0: " + xp0, 700, 50);
+            g.fillText("xp1: " + xp1, 700, 75);
+        }
+    </script>
+</html>

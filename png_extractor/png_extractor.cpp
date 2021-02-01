@@ -215,7 +215,7 @@ u32 parseHuffmanCodeFromData(u8* data, u32* offset, PNGHuffman* pngh){
 }
 
 s32 main(u32 argc, s8** argv){
-    s8* fileName = "C:/Users/Dave/Desktop/test.png";
+    s8* fileName = "weird_diffuse.png";
     FILE* fileHandle = fopen(fileName, "rb");
     fseek(fileHandle, 0L, SEEK_END);
     u32 fileSize = ftell(fileHandle);
@@ -566,23 +566,23 @@ s32 main(u32 argc, s8** argv){
         rc++;
     }
 
-    // if(colorType == 2){
-    //     u32 dataWidthAlphaSize = width * height * 4;
-    //     u8* ucDataWithAlpha = (u8*)malloc(dataWidthAlphaSize);
-    //     u8* ucdaPtr = ucDataWithAlpha;
-    //     uncompressedDataPtr = uncompressedData;
-    //     for(u32 i = 0; i < uncompressedDataSize; i += 3){
-    //         *ucdaPtr++ = *uncompressedDataPtr++;
-    //         *ucdaPtr++ = *uncompressedDataPtr++;
-    //         *ucdaPtr++ = *uncompressedDataPtr++;
-    //         *ucdaPtr++ = 255;
-    //     }
-    //     free(uncompressedData);
-    //     uncompressedData = ucDataWithAlpha;
-    //     uncompressedDataSize = dataWidthAlphaSize;
-    // }
+    if(colorType == 2){
+        u32 dataWidthAlphaSize = width * height * 4;
+        u8* ucDataWithAlpha = (u8*)malloc(dataWidthAlphaSize);
+        u8* ucdaPtr = ucDataWithAlpha;
+        uncompressedDataPtr = uncompressedData;
+        for(u32 i = 0; i < uncompressedDataSize; i += 3){
+            *ucdaPtr++ = *uncompressedDataPtr++;
+            *ucdaPtr++ = *uncompressedDataPtr++;
+            *ucdaPtr++ = *uncompressedDataPtr++;
+            *ucdaPtr++ = 255;
+        }
+        free(uncompressedData);
+        uncompressedData = ucDataWithAlpha;
+        uncompressedDataSize = dataWidthAlphaSize;
+    }
     
-    fileHandle = fopen("test.texpix", "wb");
+    fileHandle = fopen("weird.texpix", "wb");
     fwrite(&width, sizeof(u32), 1, fileHandle);
     fwrite(&height, sizeof(u32), 1, fileHandle);
     fwrite(uncompressedData, sizeof(u8), uncompressedDataSize, fileHandle);
