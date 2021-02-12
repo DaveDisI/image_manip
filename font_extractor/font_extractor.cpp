@@ -61,85 +61,60 @@ static void printU32AsString(u32 s){
     printf("%s\n", str);
 }
 
-static u32 readBitsFromArray(u8* array, u32 numBits, u32* offset, bool increaseOffset = true){
+static u32 readBytesFromArray(u8* array, u32 numBytes, u32* offset, bool increaseOffset = true){
     u32 result = 0;
-    u32 byteIndex = *offset / 8;
-    u8 bitIndex = *offset % 8;
-
-    for(int i = 0; i < numBits; i++){
-        u8 bit = (array[byteIndex] >> bitIndex) & 1;
-        result |= bit << i;
-        bitIndex++;
-        if(bitIndex % 8 == 0){
-            bitIndex = 0;
-            byteIndex++;
-        }
+    u32 byteIndex = *offset;
+    for(int i = 0; i < numBytes; i++){
+        u8 byte = array[byteIndex];
+        result |= byte << (i * 8);
+        byteIndex++;
     }
 
-    if(increaseOffset) *offset += numBits;
-    return result;
-}
-
-static u32 readBitsFromArrayReversed(u8* array, u32 numBits, u32* offset, bool increaseOffset = true){
-    u32 result = 0;
-    u32 byteIndex = *offset / 8;
-    u8 bitIndex = *offset % 8;
-
-    for(int i = 0; i < numBits; i++){
-        u8 bit = (array[byteIndex] >> bitIndex) & 1;
-        result |= bit << (numBits - i - 1);
-        bitIndex++;
-        if(bitIndex % 8 == 0){
-            bitIndex = 0;
-            byteIndex++;
-        }
-    }
-
-    if(increaseOffset) *offset += numBits;
+    if(increaseOffset) *offset += numBytes;
     return result;
 }
 
 static u16 getCharacterGlyphIndex(u16 characterCode, u8* cmapPtr){
-    u32 dataOffset = 16; //skip version
-    u16 numCMAPTables = readBitsFromArray(cmapPtr, 16, &dataOffset);
+    u32 dataOffset = 2; //skip version
+    u16 numCMAPTables = readBytesFromArray(cmapPtr, 2, &dataOffset);
     numCMAPTables = SWAP16(numCMAPTables);
     for(u32 i = 0; i < numCMAPTables; i++){
-        u16 platformID = readBitsFromArray(cmapPtr, 16, &dataOffset);
-        u16 encodingID = readBitsFromArray(cmapPtr, 16, &dataOffset);
-        u32 subtableOffset = readBitsFromArray(cmapPtr, 32, &dataOffset);
+        u16 platformID = readBytesFromArray(cmapPtr, 2, &dataOffset);
+        u16 encodingID = readBytesFromArray(cmapPtr, 2, &dataOffset);
+        u32 subtableOffset = readBytesFromArray(cmapPtr, 4, &dataOffset);
         platformID = SWAP16(platformID);
         encodingID = SWAP16(encodingID);
         subtableOffset = SWAP32(subtableOffset);
-        subtableOffset *= 8;
-        u16 format = readBitsFromArray(cmapPtr, 16, &subtableOffset);
+        subtableOffset *= 1;
+        u16 format = readBytesFromArray(cmapPtr, 2, &subtableOffset);
         format = SWAP16(format);
         switch(format){
             case 0:{
                 if(characterCode > 255) break;
-                subtableOffset += 32; //skip length and language
-                subtableOffset += characterCode * 8;
-                return readBitsFromArray(cmapPtr, 8, &subtableOffset);
+                subtableOffset += 4; //skip length and language
+                subtableOffset += characterCode;
+                return readBytesFromArray(cmapPtr, 1, &subtableOffset);
             }
             case 2:{
                 printf("2\n");
                 break;
             }
             case 4:{
-                subtableOffset += 32; //skip length and language
-                u16 segCountx2 = readBitsFromArray(cmapPtr, 16, &subtableOffset);
-                subtableOffset += 48; //skip search range, entry selector, and range shift
+                subtableOffset += 4; //skip length and language
+                u16 segCountx2 = readBytesFromArray(cmapPtr, 2, &subtableOffset);
+                subtableOffset += 6; //skip search range, entry selector, and range shift
                 segCountx2 = SWAP16(segCountx2);
                 u16 segCount = segCountx2 / 2;
                 
-                u32 sz = segCount * sizeof(u16) * 8;
-                u16* endCodes = (u16*)cmapPtr + (subtableOffset / 16);
+                u32 sz = segCount * sizeof(u16);
+                u16* endCodes = (u16*)cmapPtr + (subtableOffset / 2);
                 subtableOffset += sz;
-                u16 reservedPad = readBitsFromArray(cmapPtr, 16, &subtableOffset);
-                u16* startCodes = (u16*)cmapPtr + (subtableOffset / 16);
+                u16 reservedPad = readBytesFromArray(cmapPtr, 2, &subtableOffset);
+                u16* startCodes = (u16*)cmapPtr + (subtableOffset / 2);
                 subtableOffset += sz;
-                u16* idDeltas = (u16*)cmapPtr + (subtableOffset / 16);
+                u16* idDeltas = (u16*)cmapPtr + (subtableOffset / 2);
                 subtableOffset += sz;
-                u16* idRangeOffsets = (u16*)cmapPtr + (subtableOffset / 16);
+                u16* idRangeOffsets = (u16*)cmapPtr + (subtableOffset / 2);
                 subtableOffset += sz;
                 
                 for(u32 j = 0; j < segCount; j++){
@@ -197,50 +172,13 @@ static u16 getCharacterGlyphIndex(u16 characterCode, u8* cmapPtr){
     return 0;
 }
 
-static void colorBitmapPixel(u8* bitmap, u32 x, u32 y, u32 bmw, u32 bmh, u8* color){
-    u32 index = (y * bmw * 4) + (x * 4);
-    bitmap[index + 0] = color[0];
-    bitmap[index + 1] = color[1];
-    bitmap[index + 2] = color[2];
-    bitmap[index + 3] = color[3];
-
-    if(y < bmh - 1){
-        index = ((y + 1)* bmw * 4) + (x * 4);
-        bitmap[index + 0] = color[0];
-        bitmap[index + 1] = color[1];
-        bitmap[index + 2] = color[2];
-        bitmap[index + 3] = color[3];
-    }
-    if(y > 0){
-        index = ((y - 1)* bmw * 4) + (x * 4);
-        bitmap[index + 0] = color[0];
-        bitmap[index + 1] = color[1];
-        bitmap[index + 2] = color[2];
-        bitmap[index + 3] = color[3];
-    }
-    if(x < bmw - 1){
-        index = (y* bmw * 4) + ((x + 1) * 4);
-        bitmap[index + 0] = color[0];
-        bitmap[index + 1] = color[1];
-        bitmap[index + 2] = color[2];
-        bitmap[index + 3] = color[3];
-    }
-    if(x > 0){
-        index = (y* bmw * 4) + ((x - 1) * 4);
-        bitmap[index + 0] = color[0];
-        bitmap[index + 1] = color[1];
-        bitmap[index + 2] = color[2];
-        bitmap[index + 3] = color[3];
-    }
-}
-
 static u8* getBitmapFromGlyfIndex(u16 glyfIndex, u8* glyfPtr, u32* bmw, u32* bmh){
     u32 dataOffset = 0;
-    s16 numberOfContours = readBitsFromArray(glyfPtr, 16, &dataOffset);
-    u16 gXMinU = readBitsFromArray(glyfPtr, 16, &dataOffset);
-    u16 gYMinU = readBitsFromArray(glyfPtr, 16, &dataOffset);
-    u16 gXMaxU = readBitsFromArray(glyfPtr, 16, &dataOffset);
-    u16 gYMaxU = readBitsFromArray(glyfPtr, 16, &dataOffset);
+    s16 numberOfContours = readBytesFromArray(glyfPtr, 2, &dataOffset);
+    u16 gXMinU = readBytesFromArray(glyfPtr, 2, &dataOffset);
+    u16 gYMinU = readBytesFromArray(glyfPtr, 2, &dataOffset);
+    u16 gXMaxU = readBytesFromArray(glyfPtr, 2, &dataOffset);
+    u16 gYMaxU = readBytesFromArray(glyfPtr, 2, &dataOffset);
     numberOfContours = SWAP16(numberOfContours);
     s16 gXMin = SWAP16(gXMinU);
     s16 gYMin = SWAP16(gYMinU);
@@ -261,18 +199,18 @@ static u8* getBitmapFromGlyfIndex(u16 glyfIndex, u8* glyfPtr, u32* bmw, u32* bmh
     u32 totalCurves = 0;
 
     for(u32 i = 0; i < numberOfContours; i++){
-        endPtsOfContours[i] = readBitsFromArray(glyfPtr, 16, &dataOffset);
+        endPtsOfContours[i] = readBytesFromArray(glyfPtr, 2, &dataOffset);
         endPtsOfContours[i] = SWAP16(endPtsOfContours[i]);
     }
-    u16 instructionLength = readBitsFromArray(glyfPtr, 16, &dataOffset);
+    u16 instructionLength = readBytesFromArray(glyfPtr, 2, &dataOffset);
     instructionLength = SWAP16(instructionLength);
-    dataOffset += instructionLength * 8; // skip instructions
+    dataOffset += instructionLength; // skip instructions
 
     u32 totalPoints =  endPtsOfContours[numberOfContours - 1] + 1;
     for(u32 i = 0; i < totalPoints; i++){
-        gflags[i] = readBitsFromArray(glyfPtr, 8, &dataOffset);
+        gflags[i] = readBytesFromArray(glyfPtr, 1, &dataOffset);
         if(gflags[i] & 8){
-            u8 amt = readBitsFromArray(glyfPtr, 8, &dataOffset);
+            u8 amt = readBytesFromArray(glyfPtr, 1, &dataOffset);
             u8 b = gflags[i];
             for(u32 j = 0; j < amt; j++){
                 i++;
@@ -285,7 +223,7 @@ static u8* getBitmapFromGlyfIndex(u16 glyfIndex, u8* glyfPtr, u32* bmw, u32* bmh
     for(u32 i = 0; i < totalPoints; i++){
         u8 flg = gflags[i];
         if(flg & 2){
-            u8 x = readBitsFromArray(glyfPtr, 8, &dataOffset);
+            u8 x = readBytesFromArray(glyfPtr, 1, &dataOffset);
             if(flg & 16){
                 points[i].x = prev + x; 
             }else{
@@ -296,7 +234,7 @@ static u8* getBitmapFromGlyfIndex(u16 glyfIndex, u8* glyfPtr, u32* bmw, u32* bmh
             if(flg & 16){
                 points[i].x = prev;
             }else{
-                u16 x = readBitsFromArray(glyfPtr, 16, &dataOffset);
+                u16 x = readBytesFromArray(glyfPtr, 2, &dataOffset);
                 x = SWAP16(x);
                 points[i].x = prev + (s16)x;
             }
@@ -308,7 +246,7 @@ static u8* getBitmapFromGlyfIndex(u16 glyfIndex, u8* glyfPtr, u32* bmw, u32* bmh
     for(u32 i = 0; i < totalPoints; i++){
         u8 flg = gflags[i];
         if(flg & 4){
-            u8 y = readBitsFromArray(glyfPtr, 8, &dataOffset);
+            u8 y = readBytesFromArray(glyfPtr, 1, &dataOffset);
             if(flg & 32){
                 points[i].y = prev + y; 
             }else{
@@ -318,7 +256,7 @@ static u8* getBitmapFromGlyfIndex(u16 glyfIndex, u8* glyfPtr, u32* bmw, u32* bmh
             if(flg & 32){
                  points[i].y = prev;
             }else{
-                u16 y = readBitsFromArray(glyfPtr, 16, &dataOffset);
+                u16 y = readBytesFromArray(glyfPtr, 2, &dataOffset);
                 y = SWAP16(y);
                 points[i].y = prev + (s16)y;
             }
@@ -335,6 +273,7 @@ static u8* getBitmapFromGlyfIndex(u16 glyfIndex, u8* glyfPtr, u32* bmw, u32* bmh
             u32 idx = j == end - 1 ? start : j + 1;
             V2 np = points[idx];
             if(gflags[idx] & 1){
+                if(gp.x == np.x && gp.y == np.y) continue;
                 Line l = {gp.x, gp.y, np.x, np.y};
                 lines[totalLines++] = l;
                 gp = np;
@@ -361,6 +300,7 @@ static u8* getBitmapFromGlyfIndex(u16 glyfIndex, u8* glyfPtr, u32* bmw, u32* bmh
         }
     }
 
+    u32 ctrrr=0;
     *bmw = gXMax - gXMin;
     *bmh = gYMax - gYMin;
     u8* bitmap = (u8*)malloc((*bmw + 1) * (*bmh + 1) * 4);
@@ -403,8 +343,8 @@ static u8* getBitmapFromGlyfIndex(u16 glyfIndex, u8* glyfPtr, u32* bmw, u32* bmh
                    (cv.p1.x > x && cv.p2.x > x && cv.cp.x > x)){
                     continue;
                 }else{
-                    f32 t0 = -2;
-                    f32 t1 = -2;
+                    f32 t0 = -1;
+                    f32 t1 = -1;
                     f32 a = cv.p1.y;
                     f32 b = cv.p2.y;
                     f32 c = cv.cp.y;
@@ -413,35 +353,28 @@ static u8* getBitmapFromGlyfIndex(u16 glyfIndex, u8* glyfPtr, u32* bmw, u32* bmh
                         f32 denom = a + b - 2 * c;
                         t0 = -(rt - a + c) / (a + b - 2 * c);
                         t1 = (rt + a - c) / (a + b - 2 * c);
-                        if((t0 > 0 && t0 <= 1) && (t1 >= 0 && t1 < 1)){
-                            f32 xp0 = (((1 - t0) * (1 - t0)) * cv.p1.x) + ((2 * t0) * (1 - t0) * cv.cp.x) + (t0 * t0 * cv.p2.x);
-                            f32 xp1 = (((1 - t1) * (1 - t1)) * cv.p1.x) + ((2 * t1) * (1 - t1) * cv.cp.x) + (t1 * t1 * cv.p2.x);
-                            if(xp0 <= x && xp1 > x){
-                                windCount--;
-                            }else if(xp1 <= x && xp0 > x){
-                                windCount++;
-                            }
-                        }else if(t0 > 0 && t0 <= 1){
+                        if((t0 == 1 && t1 == 1) || (t0 == 0 && t1 == 0)){
+                            if(y > cv.p1.y || y > cv.p2.y) continue;
+                        }
+                        if(t0 > 0 && t0 <= 1){
                             f32 xp0 = (((1 - t0) * (1 - t0)) * cv.p1.x) + ((2 * t0) * (1 - t0) * cv.cp.x) + (t0 * t0 * cv.p2.x);
                             if(xp0 <= x){
                                 windCount--;
                             }
-                        }else if(t1 >= 0 && t1 < 1){
-                            f32 xp1 = (((1 - t1) * (1 - t1)) * cv.p1.x) + ((2 * t1) * (1 - t1) * cv.cp.x) + (t1 * t1 * cv.p2.x);
-                            if(xp1 <= x){
+                        }
+                        if(t1 >= 0 && t1 < 1){
+                            f32 xp0 = (((1 - t1) * (1 - t1)) * cv.p1.x) + ((2 * t1) * (1 - t1) * cv.cp.x) + (t1 * t1 * cv.p2.x);
+                            if(xp0 <= x){
                                 windCount++;
                             }
                         }
-                    }else if(b != c && a == 2 * c - b){
+                    }
+                    else if(b != c && a == 2 * c - b){
                         t0 = (b - 2 * c + y) / (2 * b - 2 * c);
                         if(t0 >= 0 && t0 < 1){
                             f32 xp = (((1 - t0) * (1 - t0)) * cv.p1.x) + ((2 * t0) * (1 - t0) * cv.cp.x) + (t0 * t0 * cv.p2.x);
                             if(xp <= x){
-                                if(a < b){
-                                    windCount++;
-                                }else{
-                                    windCount--;
-                                }
+                                windCount++;
                             }
                         }
                     }
@@ -450,8 +383,8 @@ static u8* getBitmapFromGlyfIndex(u16 glyfIndex, u8* glyfPtr, u32* bmw, u32* bmh
 
             if(windCount != 0){
                 color[0] = 0;
-                color[1] = 255;
-                color[2] = 255;
+                color[1] = 0;
+                color[2] = 0;
             }        
             bitmap[ctr++] = color[0];
             bitmap[ctr++] = color[1];
@@ -459,70 +392,6 @@ static u8* getBitmapFromGlyfIndex(u16 glyfIndex, u8* glyfPtr, u32* bmw, u32* bmh
             bitmap[ctr++] = color[3];
         }
     }
-    u8 color[] = {0, 0, 255, 255};
-    for(u32 i = 0; i < totalLines; i++){
-        Line l = lines[i];
-        s16 xdif = l.p2.x - l.p1.x;
-        s16 ydif = l.p2.y - l.p1.y;
-        f32 start = 0;
-        f32 end = 0;
-        if(xdif == 0){
-            start = l.p1.y < l.p2.y ? l.p1.y : l.p2.y;
-            end = start == l.p1.y ? l.p2.y : l.p1.y;
-            for(s16 j = start; j < end; j++){
-                u32 x = l.p1.x - gXMin;
-                u32 y = j - gYMin;
-                colorBitmapPixel(bitmap, x, y, *bmw, *bmh, color);
-            }
-        }else if(ydif == 0){
-            start = l.p1.x < l.p2.x ? l.p1.x : l.p2.x;
-            end = start == l.p1.x ? l.p2.x : l.p1.x;
-            for(s16 j = start; j < end; j++){
-                u32 y = l.p1.y - gYMin;
-                u32 x = j - gXMin;
-                colorBitmapPixel(bitmap, x, y, *bmw, *bmh, color);
-            }
-        }else{
-            f32 slope = (f32)ydif / (f32)xdif;
-            f32 b = (f32)l.p1.y - (slope * (f32)l.p1.x);
-            if(absoluteValue(xdif) > absoluteValue(ydif)){
-                start = l.p1.x < l.p2.x ? l.p1.x : l.p2.x;
-                end = start == l.p1.x ? l.p2.x : l.p1.x;
-                for(f32 j = start; j < end; j += 1){
-                    f32 x = j - gXMin;
-                    f32 y = ((slope * (f32)j) + b) - gYMin;
-                    colorBitmapPixel(bitmap, x, y, *bmw, *bmh, color);
-                }
-            }else{
-                start = l.p1.y < l.p2.y ? l.p1.y : l.p2.y;
-                end = start == l.p1.y ? l.p2.y : l.p1.y;
-                for(f32 j = start; j < end; j += 1){
-                    f32 y = j - gYMin;
-                    f32 x = (j / slope - b / slope) - gXMin;
-                    colorBitmapPixel(bitmap, x, y, *bmw, *bmh, color);
-                }
-            }
-        }
-    }
-
-    color[0] = 255;
-    for(u32 i = 0; i < totalCurves; i++){
-        Curve c = curves[i];
-        s16 xdif = c.p2.x - c.p1.x;
-        s16 ydif = c.p2.y - c.p1.y;
-        f32 t = 0;
-        f32 interval = 0.01;
-
-        while(t < 1){
-            f32 nx = (((1 - t) * (1 - t)) * c.p1.x) + ((2 * t) * (1 - t) * c.cp.x) + (t * t * c.p2.x);
-            f32 ny = (((1 - t) * (1 - t)) * c.p1.y) + ((2 * t) * (1 - t) * c.cp.y) + (t * t * c.p2.y);
-            t += interval;
-            nx -= gXMin;
-            ny -= gYMin;
-            colorBitmapPixel(bitmap, nx, ny, *bmw, *bmh, color);
-        }
-    }
-
     return bitmap;
 }
 
@@ -545,14 +414,20 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam){
             if(wParam == VK_ESCAPE){
                 exit(0);
             }
-            RedrawWindow(hwnd, 0, 0, RDW_INTERNALPAINT);
+            break;
+        }
+        case WM_LBUTTONDOWN:{
+            s32 xPos = LOWORD(lParam); 
+            s32 yPos = HIWORD(lParam);
+            printf("%i %i\n", xPos, (bmh / 2) - yPos);
+            break;
         }
     }
     return DefWindowProc(hwnd, uMsg, wParam, lParam);
 }
 
 s32 main(u32 argc, s8** argv){
-    FILE* file = fopen("ARIAL.TTF", "rb");
+    FILE* file = fopen("couri.ttf", "rb");
     fseek(file, 0L, SEEK_END);
     u32 fileSize = ftell(file);
     rewind(file);
@@ -561,30 +436,24 @@ s32 main(u32 argc, s8** argv){
     fclose(file);
 
     u32 dataOffset = 0;
-    u32 sfntVersion = readBitsFromArray(fileData, 32, &dataOffset);
-    u16 numTables = readBitsFromArray(fileData, 16, &dataOffset);
-    u16 searchRange = readBitsFromArray(fileData, 16, &dataOffset);
-    u16 entrySelector = readBitsFromArray(fileData, 16, &dataOffset);
-    u16 rangeShift = readBitsFromArray(fileData, 16, &dataOffset);
-    sfntVersion = SWAP32(sfntVersion);
+    u32 dataOffset2 = 0;
+    u32 sfntVersion = readBytesFromArray(fileData, 4, &dataOffset);
+    u16 numTables = readBytesFromArray(fileData, 2, &dataOffset);
+    u16 searchRange = readBytesFromArray(fileData, 2, &dataOffset);
+    u16 entrySelector = readBytesFromArray(fileData, 2, &dataOffset);
+    u16 rangeShift = readBytesFromArray(fileData, 2, &dataOffset);
     numTables = SWAP16(numTables);
-    searchRange = SWAP16(searchRange);
-    entrySelector = SWAP16(entrySelector);
-    rangeShift = SWAP16(rangeShift);
-
 
     u32 headerTableOffset = 0;
     u32 cmapTableOffset = 0;
     u32 locaTableOffset = 0;
     u32 glyfTableOffset = 0;
     for(u32 i = 0; i < numTables; i++){
-        u32 tag = readBitsFromArray(fileData, 32, &dataOffset);
-        u32 checksum = readBitsFromArray(fileData, 32, &dataOffset);
-        u32 offset = readBitsFromArray(fileData, 32, &dataOffset);
-        u32 length = readBitsFromArray(fileData, 32, &dataOffset);
-        checksum = SWAP32(checksum);
+        u32 tag = readBytesFromArray(fileData, 4, &dataOffset);
+        u32 checksum = readBytesFromArray(fileData, 4, &dataOffset);
+        u32 offset = readBytesFromArray(fileData, 4, &dataOffset);
+        u32 length = readBytesFromArray(fileData, 4, &dataOffset);
         offset = SWAP32(offset);
-        length = SWAP32(length);
 
         switch(tag){
             case 'daeh':{
@@ -608,33 +477,29 @@ s32 main(u32 argc, s8** argv){
 
     u8* headPtr = fileData + headerTableOffset;
     dataOffset = 0;
-    u16 majorVersion = readBitsFromArray(headPtr, 16, &dataOffset);
-    u16 minorVersion = readBitsFromArray(headPtr, 16, &dataOffset);
-    f32 fontRevision = readBitsFromArray(headPtr, 32, &dataOffset);
-    u32 checksumAdjustment = readBitsFromArray(headPtr, 32, &dataOffset);
-    u32 majicNumber = readBitsFromArray(headPtr, 32, &dataOffset);
-    u16 flags = readBitsFromArray(headPtr, 16, &dataOffset);
-    u16 unitsPerEm = readBitsFromArray(headPtr, 16, &dataOffset);
-    dataOffset += 128; //skip created and modified dates
-    s16 xmin = readBitsFromArray(headPtr, 16, &dataOffset);
-    s16 ymin = readBitsFromArray(headPtr, 16, &dataOffset);
-    s16 xmax = readBitsFromArray(headPtr, 16, &dataOffset);
-    s16 ymax = readBitsFromArray(headPtr, 16, &dataOffset);
-    u16 macStyle = readBitsFromArray(headPtr, 16, &dataOffset);
-    u16 lowestRecPPEM = readBitsFromArray(headPtr, 16, &dataOffset);
-    s16 fontDirectionHint = readBitsFromArray(headPtr, 16, &dataOffset);
-    s16 indexToLocFormat = readBitsFromArray(headPtr, 16, &dataOffset);
-    s16 glyphDataFormat = readBitsFromArray(headPtr, 16, &dataOffset);
-    majorVersion = SWAP16(majorVersion);
-    minorVersion = SWAP16(minorVersion);
-    checksumAdjustment = SWAP32(checksumAdjustment);
-    majicNumber = SWAP32(majicNumber);
+    u16 majorVersion = readBytesFromArray(headPtr, 2, &dataOffset);
+    u16 minorVersion = readBytesFromArray(headPtr, 2, &dataOffset);
+    f32 fontRevision = readBytesFromArray(headPtr, 4, &dataOffset);
+    u32 checksumAdjustment = readBytesFromArray(headPtr, 4, &dataOffset);
+    u32 majicNumber = readBytesFromArray(headPtr, 4, &dataOffset);
+    u16 flags = readBytesFromArray(headPtr, 2, &dataOffset);
+    u16 unitsPerEm = readBytesFromArray(headPtr, 2, &dataOffset);
+    dataOffset += 16; //skip created and modified dates
+    s16 xmin = readBytesFromArray(headPtr, 2, &dataOffset);
+    s16 ymin = readBytesFromArray(headPtr, 2, &dataOffset);
+    s16 xmax = readBytesFromArray(headPtr, 2, &dataOffset);
+    s16 ymax = readBytesFromArray(headPtr, 2, &dataOffset);
+    u16 macStyle = readBytesFromArray(headPtr, 2, &dataOffset);
+    u16 lowestRecPPEM = readBytesFromArray(headPtr, 2, &dataOffset);
+    s16 fontDirectionHint = readBytesFromArray(headPtr, 2, &dataOffset);
+    s16 indexToLocFormat = readBytesFromArray(headPtr, 2, &dataOffset);
+    s16 glyphDataFormat = readBytesFromArray(headPtr, 2, &dataOffset);
+
     flags = SWAP16(flags);
     xmin = SWAP16(xmin);
     ymin = SWAP16(ymin);
     xmax = SWAP16(xmax);
     ymax = SWAP16(ymax);
-    macStyle = SWAP16(macStyle);
     lowestRecPPEM = SWAP16(lowestRecPPEM);
     fontDirectionHint = SWAP16(fontDirectionHint);
     indexToLocFormat = SWAP16(indexToLocFormat);
@@ -642,10 +507,10 @@ s32 main(u32 argc, s8** argv){
 
     u8* cmapPtr = fileData + cmapTableOffset;
     dataOffset = 0;
-    u32 index = getCharacterGlyphIndex('&', cmapPtr);    
+    u32 index = getCharacterGlyphIndex('#', cmapPtr);    
     u32 locaEntrySize = (2 + (2 * indexToLocFormat));
     u8* locaPtr = fileData + locaTableOffset + (index * locaEntrySize);
-    u32 glyphOffset = readBitsFromArray(locaPtr, locaEntrySize * 8, &dataOffset, false);
+    u32 glyphOffset = readBytesFromArray(locaPtr, locaEntrySize, &dataOffset, false);
     if(locaEntrySize == 2){
         glyphOffset = SWAP16(glyphOffset);
     }else{
