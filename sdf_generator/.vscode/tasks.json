@@ -1,0 +1,15 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"type": "shell",
+			"label": "win_build",
+			"command": "${workspaceFolder}/build",
+		},
+		{
+			"type": "shell",
+			"label": "win_run",
+			"command": "${workspaceFolder}/sdf_generator",
+		}
+	]
+}

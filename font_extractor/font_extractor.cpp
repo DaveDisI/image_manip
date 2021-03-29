@@ -426,8 +426,13 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam){
     return DefWindowProc(hwnd, uMsg, wParam, lParam);
 }
 
+static bool onColor(u8* bitmap, u32 x, u32 y){
+    u32 idx = y * (bmw + 1) * 4 + x * (bmw + 1);
+    return bitmap[bmIdx] == 0;
+}
+
 s32 main(u32 argc, s8** argv){
-    FILE* file = fopen("couri.ttf", "rb");
+    FILE* file = fopen("ARIAL.TTF", "rb");
     fseek(file, 0L, SEEK_END);
     u32 fileSize = ftell(file);
     rewind(file);
@@ -507,7 +512,7 @@ s32 main(u32 argc, s8** argv){
 
     u8* cmapPtr = fileData + cmapTableOffset;
     dataOffset = 0;
-    u32 index = getCharacterGlyphIndex('#', cmapPtr);    
+    u32 index = getCharacterGlyphIndex('@', cmapPtr);    
     u32 locaEntrySize = (2 + (2 * indexToLocFormat));
     u8* locaPtr = fileData + locaTableOffset + (index * locaEntrySize);
     u32 glyphOffset = readBytesFromArray(locaPtr, locaEntrySize, &dataOffset, false);
