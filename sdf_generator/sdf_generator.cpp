@@ -2,6 +2,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <windows.h>
+#include <assert.h>
 
 typedef char s8;
 typedef short s16;
@@ -17,22 +18,9 @@ typedef double f64;
 RECT rc;
 ID2D1HwndRenderTarget* pRT = 0;
 ID2D1Bitmap* d2dBitmap = 0;
-const u32 bmw = 512;
-const u32 bmh = 512;
-bool aug[bmw][bmh] = {};
 
-s32 get(s32* b, u32 x, u32 y) {
-    return b[y * bmw + x];
-}
-
-f32 map(f32 v, f32 min1, f32 max1, f32 min2, f32 max2) {
-    f32 rat = (v - min1) / (max1 - min1);
-    return (rat * (max2 - min2)) + min2;
-}
-
-f32 distance(f32 x1, f32 y1, f32 x2, f32 y2) {
-    return sqrt((x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1));
-}
+u32 bmw = 512;
+u32 bmh = 512;
 
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     switch (uMsg) {
@@ -64,93 +52,193 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
     return DefWindowProc(hwnd, uMsg, wParam, lParam);
 }
 
-f32* convertBitmapToSDF(u8* bitmap, u32 bmw, u32 bmh) {
-    f32* sdf = (f32*)malloc(bmw * bmh * sizeof(f32));
+struct WorkEntry {
+    void (*function)(void*);
+    void* data;
+};
 
-    for (s32 y = 0; y < bmh; y++) {
-        for (s32 x = 0; x < bmw; x++) {
-            u32 bmi = y * bmw * 4 + x * 4;
-            u32 sdi = y * bmw + x;
-            s32 range = 1;
-            f32 cDist = 0xffffffff;
-            u8 fndValue = 0;
+struct WorkQueue {
+    static const u32 MAX_ENTRIES = 256;
+    WorkEntry entries[MAX_ENTRIES];
+    volatile u32 entryAddPos;
+    volatile u32 entryStartPos;
+    volatile u32 entriesAdded;
+    volatile u32 entriesCompleted;
+    HANDLE semaphore;
+};
 
-            if (bitmap[bmi] == 0) {
-                fndValue = 255;
-            }
+struct ThreadInfo {
+    WorkQueue* queue;
+    s32 index;
+};
 
-            bool found = false;
-            while (!found) {
-                //check upper limit
-                s32 yy = y - range;
-                s32 xx;
-                if (yy > -1) {
-                    for (xx = x - range; xx < x + range; xx++) {
-                        if (xx < 0 || xx >= bmw) continue;
-                        u32 ind = yy * bmw * 4 + xx * 4;
-                        f32 d = 0;
-                        if (bitmap[ind] == fndValue) {
-                            d = distance(x, y, xx, yy);
-                            if (d < cDist) cDist = d;
-                            found = true;
-                        }
-                    }
-                }
-                //check lower limit
-                yy = y + range;
-                if (yy < bmh) {
-                    for (xx = x - range; xx < x + range; xx++) {
-                        if (xx < 0 || xx >= bmw) continue;
-                        u32 ind = yy * bmw * 4 + xx * 4;
-                        f32 d = 0;
-                        if (bitmap[ind] == fndValue) {
-                            d = distance(x, y, xx, yy);
-                            if (d < cDist) cDist = d;
-                            found = true;
-                        }
-                    }
-                }
-                //check left limit
-                xx = x - range;
-                if (xx > -1) {
-                    for (yy = y - range; yy < y + range; yy++) {
-                        if (yy < 0 || yy >= bmh) continue;
-                        u32 ind = yy * bmw * 4 + xx * 4;
-                        f32 d = 0;
-                        if (bitmap[ind] == fndValue) {
-                            d = distance(x, y, xx, yy);
-                            if (d < cDist) cDist = d;
-                            found = true;
-                        }
-                    }
-                }
-                //check right limit
-                xx = x + range;
-                if (xx < bmw) {
-                    for (yy = y - range; yy < y + range; yy++) {
-                        if (yy < 0 || yy >= bmh) continue;
-                        u32 ind = yy * bmw * 4 + xx * 4;
-                        f32 d = 0;
-                        if (bitmap[ind] == fndValue) {
-                            d = distance(x, y, xx, yy);
-                            if (d < cDist) cDist = d;
-                            found = true;
-                        }
-                    }
-                }
-                range++;
-            }
-            if (fndValue == 255) {
-                sdf[sdi] = -cDist;
-            } else {
-                sdf[sdi] = cDist;
-            }
+static void addWorkQueueEntry(WorkQueue* wq, void (*function)(void*), void* data) {
+    u32 nextAddPos = (wq->entryAddPos + 1) % wq->MAX_ENTRIES;
+    assert(nextAddPos != wq->entryStartPos);
+    wq->entries[wq->entryAddPos].function = function;
+    wq->entries[wq->entryAddPos].data = data;
+    wq->entriesAdded++;
+    _mm_sfence();
+    wq->entryAddPos = nextAddPos;
+    ReleaseSemaphore(wq->semaphore, 1, 0);
+}
+
+static inline boolean performWorkQueueEntry(WorkQueue* wq) {
+    u32 started = wq->entryStartPos;
+    u32 nextStartPos = (started + 1) % wq->MAX_ENTRIES;
+    if (started != wq->entryAddPos) {
+        u32 wes = InterlockedCompareExchange((volatile LONG*)&wq->entryStartPos, nextStartPos, started);
+        if(wes == started){
+            WorkEntry* entry = wq->entries + wes;
+            entry->function(entry->data);
+ 
+            InterlockedIncrement((volatile LONG*)&wq->entriesCompleted);
+            return true;
         }
     }
-    return sdf;
+    return false;
+}
+
+static void completeWorkQueueEntries(WorkQueue* wq) {
+    while (wq->entriesCompleted < wq->entriesAdded) {
+        performWorkQueueEntry(wq);
+    }
+    wq->entriesAdded = 0;
+    wq->entriesCompleted = 0;
+}
+
+DWORD threadProc(LPVOID threadData) {
+    ThreadInfo* threadInfo = (ThreadInfo*)threadData;
+    while (true) {
+        if (!performWorkQueueEntry(threadInfo->queue)) {
+            WaitForSingleObjectEx(threadInfo->queue->semaphore, INFINITE, false);
+        }
+    }
+    return 0;
+}
+
+f32 distance(f32 x1, f32 y1, f32 x2, f32 y2) {
+    return sqrt((x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1));
+}
+
+struct NearestContourFinder {
+    u8* bitmap;
+    f32* distance;
+    s32 x;
+    s32 y;
+    u32 w;
+    u32 h;
+};
+
+void findDistanceToNearestContour(void* data) {
+    NearestContourFinder* ncf = (NearestContourFinder*)data;
+    u8* bitmap = ncf->bitmap;
+    s32 x = ncf->x;
+    s32 y = ncf->y;
+    u32 bmw = ncf->w;
+    u32 bmh = ncf->h;
+
+    u32 bmi = y * bmw * 4 + x * 4;
+    u32 sdi = y * bmw + x;
+    s32 range = 1;
+    f32 cDist = 0xffffffff;
+    u8 fndValue = 0;
+
+    if (bitmap[bmi] == 0) {
+        fndValue = 255;
+    }
+
+    bool found = false;
+    while (!found) {
+        //check upper limit
+        s32 yy = y - range;
+        s32 xx;
+        if (yy > -1) {
+            for (xx = x - range; xx < x + range; xx++) {
+                if (xx < 0 || xx >= bmw) continue;
+                u32 ind = yy * bmw * 4 + xx * 4;
+                f32 d = 0;
+                if (bitmap[ind] == fndValue) {
+                    d = distance(x, y, xx, yy);
+                    if (d < cDist) cDist = d;
+                    found = true;
+                }
+            }
+        }
+        //check lower limit
+        yy = y + range;
+        if (yy < bmh) {
+            for (xx = x - range; xx < x + range; xx++) {
+                if (xx < 0 || xx >= bmw) continue;
+                u32 ind = yy * bmw * 4 + xx * 4;
+                f32 d = 0;
+                if (bitmap[ind] == fndValue) {
+                    d = distance(x, y, xx, yy);
+                    if (d < cDist) cDist = d;
+                    found = true;
+                }
+            }
+        }
+        //check left limit
+        xx = x - range;
+        if (xx > -1) {
+            for (yy = y - range; yy < y + range; yy++) {
+                if (yy < 0 || yy >= bmh) continue;
+                u32 ind = yy * bmw * 4 + xx * 4;
+                f32 d = 0;
+                if (bitmap[ind] == fndValue) {
+                    d = distance(x, y, xx, yy);
+                    if (d < cDist) cDist = d;
+                    found = true;
+                }
+            }
+        }
+        //check right limit
+        xx = x + range;
+        if (xx < bmw) {
+            for (yy = y - range; yy < y + range; yy++) {
+                if (yy < 0 || yy >= bmh) continue;
+                u32 ind = yy * bmw * 4 + xx * 4;
+                f32 d = 0;
+                if (bitmap[ind] == fndValue) {
+                    d = distance(x, y, xx, yy);
+                    if (d < cDist) cDist = d;
+                    found = true;
+                }
+            }
+        }
+        range++;
+    }
+    if (fndValue == 255) {
+        *ncf->distance = -cDist;
+    } else {
+        *ncf->distance = cDist;
+    }
 }
 
 s32 main(s32 argc, s8** argv) {
+    SYSTEM_INFO sysInf;
+    GetSystemInfo(&sysInf);
+
+    const u32 threadCount = 7;  //sysInf.dwNumberOfProcessors - 1;
+    LPVOID threadData;
+
+    WorkQueue workQueue = {};
+
+    ThreadInfo threadInfo[threadCount + 1] = {};
+    workQueue.semaphore = CreateSemaphoreEx(0, 0, threadCount, 0, 0, SEMAPHORE_ALL_ACCESS);
+    for (u32 i = 0; i < threadCount; i++) {
+        threadInfo[i].index = i;
+        threadInfo[i].queue = &workQueue;
+        DWORD threadID;
+        HANDLE thread = CreateThread(0, 0, threadProc, &threadInfo[i], 0, &threadID);
+        CloseHandle(thread);
+    }
+    threadInfo[threadCount].index = 7;
+    threadInfo[threadCount].queue = &workQueue;
+
+    u32 bmw = 512;
+    u32 bmh = 512;
     u8* bitmap = (u8*)malloc(bmw * bmh * 4);
     for (u32 y = 0; y < bmh; y++) {
         for (u32 x = 0; x < bmw; x++) {
@@ -168,22 +256,32 @@ s32 main(s32 argc, s8** argv) {
                 bitmap[index + 2] = 255;
                 bitmap[index + 3] = 255;
             }
-
-            // if (x > (bmw / 4) && x < (bmw - (bmw / 4)) && y > (bmh / 4) && y < (bmh - (bmh / 4))) {
-            //     bitmap[index + 0] = 0;
-            //     bitmap[index + 1] = 0;
-            //     bitmap[index + 2] = 0;
-            //     bitmap[index + 3] = 255;
-            // } else {
-            //     bitmap[index + 0] = 255;
-            //     bitmap[index + 1] = 255;
-            //     bitmap[index + 2] = 255;
-            //     bitmap[index + 3] = 255;
-            // }
         }
     }
+    f32* sdf = (f32*)malloc(bmw * bmh * sizeof(f32));
+    NearestContourFinder* ncf = (NearestContourFinder*)malloc(bmw * bmh * sizeof(NearestContourFinder));
+    int ctr = 0;
+    for (s32 y = 0; y < bmw; y++) {
+        for (s32 x = 0; x < bmh; x++) {
+            u32 i = y * bmw + x;
+            ncf[i].bitmap = bitmap;
+            ncf[i].x = x;
+            ncf[i].y = y;
+            ncf[i].w = bmw;
+            ncf[i].h = bmh;
+            ncf[i].distance = &sdf[i];
+            // findDistanceToNearestContour(&ncf[x][y]);
+            addWorkQueueEntry(&workQueue, findDistanceToNearestContour, &ncf[i]);
+            ctr++;
+            if(ctr == workQueue.MAX_ENTRIES){
+                completeWorkQueueEntries(&workQueue);
+                ctr = 0;
+            }
+        }
+    }
+    
+    completeWorkQueueEntries(&workQueue);
 
-    f32* sdf = convertBitmapToSDF(bitmap, bmw, bmh);
     f32 min = 0xffffffff;
     f32 max = 0;
     for (u32 i = 0; i < bmw * bmh; i++) {
@@ -193,18 +291,17 @@ s32 main(s32 argc, s8** argv) {
     }
     for (u32 i = 0; i < bmw * bmh; i++) {
         sdf[i] /= max - min;
-        printf("%f\n", sdf[i]);
     }
 
     u32 bct = 0;
-    // for (u32 i = 0; i < bmw * bmh; i++) {
-    //     f32 v = ((sdf[i] + 1) / 2.0) * 255;
+    for (u32 i = 0; i < bmw * bmh; i++) {
+        f32 v = ((sdf[i] + 1) / 2.0) * 255;
         
-    //     bitmap[bct++] = (u8)v;
-    //     bitmap[bct++] = (u8)v;
-    //     bitmap[bct++] = (u8)v;
-    //     bitmap[bct++] = 255;
-    // }
+        bitmap[bct++] = (u8)v;
+        bitmap[bct++] = (u8)v;
+        bitmap[bct++] = (u8)v;
+        bitmap[bct++] = 255;
+    }
 
     WNDCLASS wc = {};
     wc.lpfnWndProc = WindowProc;
