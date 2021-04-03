@@ -472,10 +472,10 @@ static u8* getBitmapFromGlyfIndex(TrueTypeFont* ttf, u16 index, u32* width, u32*
     if (numberOfContours < 0) {
         //complex glyphs
         GlyfShape masterShape = {};
-        masterShape.xMin = 0xffffffff;
-        masterShape.xMax = -0xffffffff;
-        masterShape.yMin = 0xffffffff;
-        masterShape.yMax = -0xffffffff;
+        masterShape.xMin = 0x7fff;
+        masterShape.xMax = 0x8000;
+        masterShape.yMin = 0x7fff;
+        masterShape.yMax = 0x8000;
 
         bool MORE_COMPONENTS = true;
         while (MORE_COMPONENTS) {
@@ -497,7 +497,7 @@ static u8* getBitmapFromGlyfIndex(TrueTypeFont* ttf, u16 index, u32* width, u32*
             bool OVERLAP_COMPOUND = flags & 1024;
 
             s16 a, b, c, d, m, n; 
-            u16 e, f;  //not sure of correct type for these
+            s32 e, f;  
 
             if (WE_HAVE_A_TWO_BY_TWO) {
                 a = readBytesFromArray(glyfPtr, 2, &dataOffset);
@@ -531,11 +531,11 @@ static u8* getBitmapFromGlyfIndex(TrueTypeFont* ttf, u16 index, u32* width, u32*
             if (ARG_1_AND_2_ARE_WORDS && ARGS_ARE_XY_VALUES) {
                 e = readBytesFromArray(glyfPtr, 2, &dataOffset);
                 f = readBytesFromArray(glyfPtr, 2, &dataOffset);
-                e = SWAP16(e);
-                f = SWAP16(f);
+                e = (s16)SWAP16(e);
+                f = (s16)SWAP16(f);
             } else if (!ARG_1_AND_2_ARE_WORDS && ARGS_ARE_XY_VALUES) {
-                e = readBytesFromArray(glyfPtr, 1, &dataOffset);
-                f = readBytesFromArray(glyfPtr, 1, &dataOffset);
+                e = (s8)readBytesFromArray(glyfPtr, 1, &dataOffset);
+                f = (s8)readBytesFromArray(glyfPtr, 1, &dataOffset);
             } else if (ARG_1_AND_2_ARE_WORDS && !ARGS_ARE_XY_VALUES) {
                 // 1st short contains the index of matching point in compound being constructed
                 // 2nd short contains index of matching point in component
@@ -724,7 +724,7 @@ static void initTrueTypeFont(s8* fileName, TrueTypeFont* font) {
 s32 main(u32 argc, s8** argv) {
     TrueTypeFont ttf = {};
     initTrueTypeFont("ARIAL.TTF", &ttf);
-    u16 idx = getGlyfIndex(&ttf, 0xfeda);
+    u16 idx = getGlyfIndex(&ttf, 0x012f);
     u8* bitmap = getBitmapFromGlyfIndex(&ttf, idx, &bmw, &bmh);
 
     WNDCLASS wc = {};
