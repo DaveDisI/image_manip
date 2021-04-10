@@ -27,6 +27,8 @@ ID2D1HwndRenderTarget* pRT = 0;
 ID2D1Bitmap* d2dBitmap = 0;
 u32 bmw, bmh;
 
+f32 scale = 1;
+
 struct V2 {
     s16 x;
     s16 y;
@@ -167,7 +169,12 @@ static u8* createBitmapFromShape(GlyfShape* shape) {
                         }
                     } else if (b != c && a == 2 * c - b) {
                         t0 = (b - 2 * c + y) / (2 * b - 2 * c);
-                        if (t0 >= 0 && t0 < 1) {
+                        if (a > b && t0 > 0 && t0 <= 1) {
+                            f32 xp = (((1 - t0) * (1 - t0)) * cv.p1.x) + ((2 * t0) * (1 - t0) * cv.cp.x) + (t0 * t0 * cv.p2.x);
+                            if (xp <= x) {
+                                windCount--;
+                            }
+                        } else if (a < b && t0 >= 0 && t0 < 1) {
                             f32 xp = (((1 - t0) * (1 - t0)) * cv.p1.x) + ((2 * t0) * (1 - t0) * cv.cp.x) + (t0 * t0 * cv.p2.x);
                             if (xp <= x) {
                                 windCount++;
@@ -201,8 +208,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         case WM_PAINT: {
             pRT->BeginDraw();
             pRT->Clear(D2D1::ColorF(1.0f, 1.0f, 1.0f, 1.0f));
-            pRT->SetTransform(D2D1::Matrix3x2F::Scale(D2D1::Size(1.0f, -1.0f), D2D1::Point2F(0.0f, (bmh / 2) / 2)));
-            pRT->DrawBitmap(d2dBitmap, D2D1::RectF(0, 0, bmw / 2, bmh / 2), 1.0f, D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR, D2D1::RectF(0, 0, bmw, bmh));
+            pRT->SetTransform(D2D1::Matrix3x2F::Scale(D2D1::Size(1.0f, -1.0f), D2D1::Point2F(0.0f, (bmh / 2) * scale)));
+            pRT->DrawBitmap(d2dBitmap, D2D1::RectF(0, 0, bmw * scale, bmh * scale), 1.0f, D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR, D2D1::RectF(0, 0, bmw, bmh));
             pRT->EndDraw();
             break;
         }
@@ -332,7 +339,7 @@ static u8* getGlyfPtrFromIndex(TrueTypeFont* ttf, u16 index) {
     return ttf->glyfPtr + glyphOffset;
 }
 
-static GlyfShape getGlyfShape(TrueTypeFont* ttf, u16 index) {
+static GlyfShape getGlyfShape(TrueTypeFont* ttf, u16 index, f32 scale) {
     GlyfShape shape = {};
 
     u8* glyfPtr = getGlyfPtrFromIndex(ttf, index);
@@ -347,6 +354,10 @@ static GlyfShape getGlyfShape(TrueTypeFont* ttf, u16 index) {
     shape.yMin = SWAP16(gYMinU);
     shape.xMax = SWAP16(gXMaxU);
     shape.yMax = SWAP16(gYMaxU);
+    shape.xMin *= scale;
+    shape.xMax *= scale;
+    shape.yMin *= scale;
+    shape.yMax *= scale;
 
     if (numberOfContours < 0) {
         GlyfShape s = {};
@@ -423,6 +434,10 @@ static GlyfShape getGlyfShape(TrueTypeFont* ttf, u16 index) {
         }
         prev = points[i].y;
     }
+    for (u32 i = 0; i < totalPoints; i++) {
+        points[i].x *= scale;
+        points[i].y *= scale;
+    }
 
     for (u32 i = 0; i < numberOfContours; i++) {
         u32 start = i == 0 ? 0 : endPtsOfContours[i - 1] + 1;
@@ -461,7 +476,8 @@ static GlyfShape getGlyfShape(TrueTypeFont* ttf, u16 index) {
     return shape;
 }
 
-static u8* getBitmapFromGlyfIndex(TrueTypeFont* ttf, u16 index, u32* width, u32* height) {
+static u8* getGlyfBitmapFromCharCode(TrueTypeFont* ttf, u16 charCode, u32* width, u32* height, f32 scale = 1) {
+    u16 index = getGlyfIndex(ttf, charCode);
     u8* glyfPtr = getGlyfPtrFromIndex(ttf, index);
     u32 dataOffset = 0;
     s16 numberOfContours = readBytesFromArray(glyfPtr, 2, &dataOffset);
@@ -483,7 +499,7 @@ static u8* getBitmapFromGlyfIndex(TrueTypeFont* ttf, u16 index, u32* width, u32*
             u16 gi = readBytesFromArray(glyfPtr, 2, &dataOffset);
             flags = SWAP16(flags);
             gi = SWAP16(gi);
-            GlyfShape shape = getGlyfShape(ttf, gi);
+            GlyfShape shape = getGlyfShape(ttf, gi, scale);
 
             bool ARG_1_AND_2_ARE_WORDS = flags & 1;
             bool ARGS_ARE_XY_VALUES = flags & 2;
@@ -496,8 +512,8 @@ static u8* getBitmapFromGlyfIndex(TrueTypeFont* ttf, u16 index, u32* width, u32*
             bool USE_MY_METRICS = flags & 512;
             bool OVERLAP_COMPOUND = flags & 1024;
 
-            s16 a, b, c, d, m, n; 
-            s32 e, f;  
+            s16 a, b, c, d, m, n;
+            s32 e, f;
 
             if (WE_HAVE_A_TWO_BY_TWO) {
                 a = readBytesFromArray(glyfPtr, 2, &dataOffset);
@@ -573,14 +589,14 @@ static u8* getBitmapFromGlyfIndex(TrueTypeFont* ttf, u16 index, u32* width, u32*
                 shape.lines[i].p2.y = yp2;
                 masterShape.lines[masterShape.totalLines++] = shape.lines[i];
 
-                if(xp1 < masterShape.xMin) masterShape.xMin = xp1;
-                if(xp2 < masterShape.xMin) masterShape.xMin = xp2;
-                if(xp1 > masterShape.xMax) masterShape.xMax = xp1;
-                if(xp2 > masterShape.xMax) masterShape.xMax = xp2;
-                if(yp1 < masterShape.yMin) masterShape.yMin = yp1;
-                if(yp2 < masterShape.yMin) masterShape.yMin = yp2;
-                if(yp1 > masterShape.yMax) masterShape.yMax = yp1;
-                if(yp2 > masterShape.yMax) masterShape.yMax = yp2;
+                if (xp1 < masterShape.xMin) masterShape.xMin = xp1;
+                if (xp2 < masterShape.xMin) masterShape.xMin = xp2;
+                if (xp1 > masterShape.xMax) masterShape.xMax = xp1;
+                if (xp2 > masterShape.xMax) masterShape.xMax = xp2;
+                if (yp1 < masterShape.yMin) masterShape.yMin = yp1;
+                if (yp2 < masterShape.yMin) masterShape.yMin = yp2;
+                if (yp1 > masterShape.yMax) masterShape.yMax = yp1;
+                if (yp2 > masterShape.yMax) masterShape.yMax = yp2;
             }
 
             for (u32 i = 0; i < shape.totalCurves; i++) {
@@ -605,19 +621,18 @@ static u8* getBitmapFromGlyfIndex(TrueTypeFont* ttf, u16 index, u32* width, u32*
                 shape.curves[i].cp.y = cyp;
                 masterShape.curves[masterShape.totalCurves++] = shape.curves[i];
 
-                if(xp1 < masterShape.xMin) masterShape.xMin = xp1;
-                if(xp2 < masterShape.xMin) masterShape.xMin = xp2;
-                if(cxp < masterShape.xMin) masterShape.xMin = cxp;
-                if(xp1 > masterShape.xMax) masterShape.xMax = xp1;
-                if(xp2 > masterShape.xMax) masterShape.xMax = xp2;
-                if(cxp > masterShape.xMax) masterShape.xMax = cxp;
-                if(yp1 < masterShape.yMin) masterShape.yMin = yp1;
-                if(yp2 < masterShape.yMin) masterShape.yMin = yp2;
-                if(cyp < masterShape.yMin) masterShape.yMin = cyp;
-                if(yp1 > masterShape.yMax) masterShape.yMax = yp1;
-                if(yp2 > masterShape.yMax) masterShape.yMax = yp2;
-                if(cyp > masterShape.yMax) masterShape.yMax = cyp;
-                
+                if (xp1 < masterShape.xMin) masterShape.xMin = xp1;
+                if (xp2 < masterShape.xMin) masterShape.xMin = xp2;
+                if (cxp < masterShape.xMin) masterShape.xMin = cxp;
+                if (xp1 > masterShape.xMax) masterShape.xMax = xp1;
+                if (xp2 > masterShape.xMax) masterShape.xMax = xp2;
+                if (cxp > masterShape.xMax) masterShape.xMax = cxp;
+                if (yp1 < masterShape.yMin) masterShape.yMin = yp1;
+                if (yp2 < masterShape.yMin) masterShape.yMin = yp2;
+                if (cyp < masterShape.yMin) masterShape.yMin = cyp;
+                if (yp1 > masterShape.yMax) masterShape.yMax = yp1;
+                if (yp2 > masterShape.yMax) masterShape.yMax = yp2;
+                if (cyp > masterShape.yMax) masterShape.yMax = cyp;
             }
         }
 
@@ -626,7 +641,7 @@ static u8* getBitmapFromGlyfIndex(TrueTypeFont* ttf, u16 index, u32* width, u32*
 
         return createBitmapFromShape(&masterShape);
     } else {
-        GlyfShape shape = getGlyfShape(ttf, index);
+        GlyfShape shape = getGlyfShape(ttf, index, scale);
 
         *width = shape.xMax - shape.xMin;
         *height = shape.yMax - shape.yMin;
@@ -723,9 +738,8 @@ static void initTrueTypeFont(s8* fileName, TrueTypeFont* font) {
 
 s32 main(u32 argc, s8** argv) {
     TrueTypeFont ttf = {};
-    initTrueTypeFont("ARIAL.TTF", &ttf);
-    u16 idx = getGlyfIndex(&ttf, 0x012f);
-    u8* bitmap = getBitmapFromGlyfIndex(&ttf, idx, &bmw, &bmh);
+    initTrueTypeFont("cour.ttf", &ttf);
+    u8* bitmap = getGlyfBitmapFromCharCode(&ttf, '&', &bmw, &bmh, 0.125);
 
     WNDCLASS wc = {};
     wc.lpfnWndProc = WindowProc;
@@ -734,7 +748,7 @@ s32 main(u32 argc, s8** argv) {
     wc.lpszClassName = "D2D";
     RegisterClass(&wc);
 
-    RECT windowRect = {0, 0, (s64)bmw / 2, (s64)bmh / 2};
+    RECT windowRect = {0, 0, (s64)(bmw * scale), (s64)(bmh * scale)};
     AdjustWindowRect(&windowRect, WS_OVERLAPPEDWINDOW, false);
     HWND hwnd = CreateWindowEx(0, "D2D", "D2D", WS_OVERLAPPEDWINDOW,
                                CW_USEDEFAULT, CW_USEDEFAULT, windowRect.right - windowRect.left, windowRect.bottom - windowRect.top, 0, 0, GetModuleHandle(0), 0);
