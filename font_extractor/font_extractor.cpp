@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include <windows.h>
 
+#include "sdf_generator.h"
+
 typedef char s8;
 typedef short s16;
 typedef int s32;
@@ -22,12 +24,30 @@ typedef double f64;
                    ((x << 16) & 0x0000ff0000000000) | ((x >> 16) & 0x0000000000ff0000) | \
                    ((x << 8) & 0x000000ff00000000) | ((x >> 8) & 0x00000000ff000000))
 
+struct Font {
+    f32* bitmap;
+    f32* xOffsets;
+    f32* yOffsets;
+    f32* widths;
+    f32* heights;
+    f32* bitmapXs;
+    f32* bitmapYs;
+    f32* bitmapWs;
+    f32* bitmapHs;
+    f32* kernings;
+    u16* characterCodes;
+    u32 totalCharacters;
+    u32 missingCharIndex;
+    u32 bmw;
+    u32 bmh;
+};
+
 RECT rc;
 ID2D1HwndRenderTarget* pRT = 0;
 ID2D1Bitmap* d2dBitmap = 0;
 u32 bmw, bmh;
 
-f32 scale = 1;
+f32 scale = 2;
 
 struct V2 {
     s16 x;
@@ -65,6 +85,69 @@ struct TrueTypeFont {
     u32 locaEntrySize;
 };
 
+struct GlyfBitmap {
+    u8* data;
+    u32 x;
+    u32 y;
+    u32 w;
+    u32 h;
+    u16 code;
+};
+
+static void swapValues(f32& p1, f32& p2){
+    f32 t = p1;
+    p1 = p2;
+    p2 = t;
+}
+
+static void swapValues(u32& p1, u32& p2){
+    u32 t = p1;
+    p1 = p2;
+    p2 = t;
+}
+
+static void swapValues(u16& p1, u16& p2){
+    u32 t = p1;
+    p1 = p2;
+    p2 = t;
+}
+
+static void sortGlyfBitmaps(GlyfBitmap* glyfs, u32 total) {
+    for (u32 i = 0; i < total - 1; i++) {
+        for (u32 j = i + 1; j < total; j++) {
+            u32 a1 = glyfs[i].w * glyfs[i].h;
+            u32 a2 = glyfs[j].w * glyfs[j].h;
+            if (a1 < a2) {
+                GlyfBitmap t = glyfs[i];
+                glyfs[i] = glyfs[j];
+                glyfs[j] = t;
+            }
+        }
+    }
+}
+
+static void sortFontByCharCodes(Font* font){
+    u32 l = font->totalCharacters;
+    for(int i = 0; i < l - 1; i++){
+        for(int j = i + 1; j < l; j++){
+            u16 c1 = font->characterCodes[i];
+            u16 c2 = font->characterCodes[j];
+            if(c1 > c2){
+                swapValues(font->xOffsets[i], font->xOffsets[j]);
+                swapValues(font->yOffsets[i], font->yOffsets[j]);
+                swapValues(font->widths[i], font->widths[j]);
+                swapValues(font->heights[i], font->heights[j]);
+                swapValues(font->bitmapXs[i], font->bitmapXs[j]);
+                swapValues(font->bitmapYs[i], font->bitmapYs[j]);
+                swapValues(font->bitmapWs[i], font->bitmapWs[j]);
+                swapValues(font->bitmapHs[i], font->bitmapHs[j]);
+                swapValues(font->kernings[i], font->kernings[j]);
+                swapValues(font->characterCodes[i], font->characterCodes[j]);
+            }
+        }
+    }
+}
+
 static f32 maxVal(f32 v1, f32 v2) {
     return v1 > v2 ? v1 : v2;
 }
@@ -101,9 +184,10 @@ static u32 readBytesFromArray(u8* array, u32 numBytes, u32* offset, bool increas
 static u8* createBitmapFromShape(GlyfShape* shape) {
     u32 bmw = shape->xMax - shape->xMin;
     u32 bmh = shape->yMax - shape->yMin;
-
-    u8* bitmap = (u8*)malloc(bmw * bmh * 4);
+    
     u32 ctr = 0;
+    u32 bmsz = bmw * bmh * 4;
+    u8* bitmap = (u8*)malloc(bmsz);
     for (s16 y = shape->yMin; y < shape->yMax; y++) {
         for (s16 x = shape->xMin; x < shape->xMax; x++) {
             u8 color[] = {255, 255, 255, 255};
@@ -189,10 +273,12 @@ static u8* createBitmapFromShape(GlyfShape* shape) {
                 color[1] = 0;
                 color[2] = 0;
             }
+
             bitmap[ctr++] = color[0];
             bitmap[ctr++] = color[1];
             bitmap[ctr++] = color[2];
             bitmap[ctr++] = color[3];
+            
         }
     }
     return bitmap;
@@ -208,7 +294,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         case WM_PAINT: {
             pRT->BeginDraw();
             pRT->Clear(D2D1::ColorF(1.0f, 1.0f, 1.0f, 1.0f));
-            pRT->SetTransform(D2D1::Matrix3x2F::Scale(D2D1::Size(1.0f, -1.0f), D2D1::Point2F(0.0f, (bmh / 2) * scale)));
+            pRT->SetTransform(D2D1::Matrix3x2F::Scale(D2D1::Size(1.0f, 1.0f), D2D1::Point2F(0.0f, (bmh / 2) * scale)));
             pRT->DrawBitmap(d2dBitmap, D2D1::RectF(0, 0, bmw * scale, bmh * scale), 1.0f, D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR, D2D1::RectF(0, 0, bmw, bmh));
             pRT->EndDraw();
             break;
@@ -273,21 +359,21 @@ static u16 getGlyfIndex(TrueTypeFont* font, u16 characterCode) {
                 subtableOffset += sz;
 
                 for (u32 j = 0; j < segCount; j++) {
-                    endCodes[j] = SWAP16(endCodes[j]);
-                    if (endCodes[j] >= characterCode) {
-                        startCodes[j] = SWAP16(startCodes[j]);
-                        if (startCodes[j] <= characterCode) {
-                            idRangeOffsets[j] = SWAP16(idRangeOffsets[j]);
-                            if (idRangeOffsets[j] > 0) {
-                                u16 idx = *(&idRangeOffsets[j] + idRangeOffsets[j] / 2 + (characterCode - startCodes[j]));
+                    u16 ec = SWAP16(endCodes[j]);
+                    if (ec >= characterCode) {
+                        u16 sc = SWAP16(startCodes[j]);
+                        if (sc <= characterCode) {
+                            u16 idro = SWAP16(idRangeOffsets[j]);
+                            if (idro > 0) {
+                                u16 idx = *(&idRangeOffsets[j] + idro / 2 + (characterCode - sc));
                                 idx = SWAP16(idx);
                                 if (idx > 0) {
-                                    idDeltas[j] = SWAP16(idDeltas[j]);
-                                    return (idx + idDeltas[j]) % 65536;
+                                    u16 idd = SWAP16(idDeltas[j]);
+                                    return (idx + idd) % 65536;
                                 }
                             } else {
-                                idDeltas[j] = SWAP16(idDeltas[j]);
-                                return (characterCode + idDeltas[j]) % 65536;
+                                u16 idd = SWAP16(idDeltas[j]);
+                                return (characterCode + idd) % 65536;
                             }
                         } else {
                             return 0;
@@ -476,8 +562,15 @@ static GlyfShape getGlyfShape(TrueTypeFont* ttf, u16 index, f32 scale) {
     return shape;
 }
 
-static u8* getGlyfBitmapFromCharCode(TrueTypeFont* ttf, u16 charCode, u32* width, u32* height, f32 scale = 1) {
+static u8* getGlyfBitmapFromCharCode(TrueTypeFont* ttf, u16 charCode, GlyfBitmap* gb, f32 scale = 1, bool empty = true) {
     u16 index = getGlyfIndex(ttf, charCode);
+
+    if (index == 0 && !empty) {
+        gb->w = 0;
+        gb->h = 0;
+        return 0;
+    }
+
     u8* glyfPtr = getGlyfPtrFromIndex(ttf, index);
     u32 dataOffset = 0;
     s16 numberOfContours = readBytesFromArray(glyfPtr, 2, &dataOffset);
@@ -636,15 +729,19 @@ static u8* getGlyfBitmapFromCharCode(TrueTypeFont* ttf, u16 charCode, u32* width
             }
         }
 
-        *width = masterShape.xMax - masterShape.xMin;
-        *height = masterShape.yMax - masterShape.yMin;
+        gb->w = masterShape.xMax - masterShape.xMin;
+        gb->h = masterShape.yMax - masterShape.yMin;
+        gb->x = masterShape.xMin;
+        gb->y = masterShape.yMin;
 
         return createBitmapFromShape(&masterShape);
     } else {
         GlyfShape shape = getGlyfShape(ttf, index, scale);
 
-        *width = shape.xMax - shape.xMin;
-        *height = shape.yMax - shape.yMin;
+        gb->w = shape.xMax - shape.xMin;
+        gb->h = shape.yMax - shape.yMin;
+        gb->x = shape.xMin;
+        gb->y = shape.yMin;
 
         return createBitmapFromShape(&shape);
     }
@@ -736,10 +833,133 @@ static void initTrueTypeFont(s8* fileName, TrueTypeFont* font) {
     font->locaEntrySize = (2 + (2 * indexToLocFormat));
 }
 
+static void copyBitmaps(u8* src, u8* dst, u32 sw, u32 sh, u32 dx, u32 dy, u32 dw) {
+    for (u32 y = 0; y < sh; y++) {
+        for (u32 x = 0; x < sw; x++) {
+            u32 si = y * sw * 4 + x * 4;
+            u32 di = (dy + y) * dw * 4 + (dx + x) * 4;
+            dst[di + 0] = src[si + 0];
+            dst[di + 1] = src[si + 1];
+            dst[di + 2] = src[si + 2];
+            dst[di + 3] = src[si + 3];
+        }
+    }
+}
+
 s32 main(u32 argc, s8** argv) {
     TrueTypeFont ttf = {};
-    initTrueTypeFont("cour.ttf", &ttf);
-    u8* bitmap = getGlyfBitmapFromCharCode(&ttf, '&', &bmw, &bmh, 0.125);
+    initTrueTypeFont("ARIAL.TTF", &ttf);
+
+    const u32 charCount = 128;
+    u32 acc = 2;
+    GlyfBitmap* glyfs = (GlyfBitmap*)malloc(sizeof(GlyfBitmap) * charCount);
+    glyfs[0].data = getGlyfBitmapFromCharCode(&ttf, 0, &glyfs[0], 0.039);
+    glyfs[1].data = 0;
+    glyfs[1].code = ' ';
+    glyfs[1].x = 0;
+    glyfs[1].y = 0;
+    glyfs[1].w = 0;
+    glyfs[1].h = 0;
+
+    for (u32 i = 2; i < charCount; i++) {
+        glyfs[i].code = ' ' + i - 1;
+        glyfs[i].data = getGlyfBitmapFromCharCode(&ttf, glyfs[i].code, &glyfs[i], 0.0388, false);
+        if (glyfs[i].w != 0) {
+            acc++;
+        }
+    }
+    sortGlyfBitmaps(glyfs, charCount);
+
+    bmw = 512;
+    bmh = 512;
+    u32 bmSize = bmw * bmh * 4;
+    u8* bitmap = (u8*)malloc(bmSize);
+    memset(bitmap, 255, bmSize);
+
+    Font font;
+    font.bmw = bmw;
+    font.bmh = bmh;
+    font.totalCharacters = acc;
+    font.xOffsets = (f32*)malloc(acc * sizeof(f32));
+    font.yOffsets = (f32*)malloc(acc * sizeof(f32));
+    font.widths = (f32*)malloc(acc * sizeof(f32));
+    font.heights = (f32*)malloc(acc * sizeof(f32));
+    font.bitmapXs = (f32*)malloc(acc * sizeof(f32));
+    font.bitmapYs = (f32*)malloc(acc * sizeof(f32));
+    font.bitmapWs = (f32*)malloc(acc * sizeof(f32));
+    font.bitmapHs = (f32*)malloc(acc * sizeof(f32));
+    font.kernings = (f32*)malloc(acc * sizeof(f32));
+    font.characterCodes = (u16*)malloc(acc * sizeof(u16));
+
+    u32 dx = 10;
+    u32 dy = 10;
+    u32 yInc = 0;
+    for (u32 i = 0; i < acc; i++) {
+        GlyfBitmap* g = glyfs + i;
+
+        if (dx + g->w > bmw) {
+            dy += yInc + 1;
+            dx = 10;
+            yInc = 0;
+            if (dy + g->h > bmh) {
+                break;
+            }
+        }
+
+        copyBitmaps(g->data, bitmap, g->w, g->h, dx, dy, bmw);
+
+        if(g->code == 0){
+            font.missingCharIndex = i;
+        }
+        font.xOffsets[i] = g->x;
+        font.yOffsets[i] = g->y;
+        font.widths[i] = g->w;
+        font.heights[i] = g->h;
+        font.bitmapXs[i] = (f32)dx / (f32)bmw;
+        font.bitmapYs[i] = (f32)dy / (f32)bmh;
+        font.bitmapWs[i] = (f32)g->w / (f32)bmw;
+        font.bitmapHs[i] = (f32)g->h / (f32)bmh;
+        font.characterCodes[i] = g->code;
+
+        if (g->h > yInc) {
+            yInc = g->h;
+        }
+        dx += g->w + 1;
+    }
+
+    sortFontByCharCodes(&font);
+
+    f32* sdf = convertBitmapToSDF(bitmap, bmw, bmh, 4);
+    u32 bct = 0;
+    for (u32 i = 0; i < bmw * bmh; i++) {
+        f32 v = ((sdf[i] + 1) / 2.0) * 255;
+        bitmap[bct++] = (u8)v;
+        bitmap[bct++] = (u8)v;
+        bitmap[bct++] = (u8)v;
+        bitmap[bct++] = 255;
+    }
+    
+    font.bitmap = sdf;
+
+
+    FILE* file = fopen("arial.sdf", "wb+");
+    fwrite(&font.bmw, sizeof(u32), 1, file);
+    fwrite(&font.bmh, sizeof(u32), 1, file);
+    fwrite(&font.totalCharacters, sizeof(u32), 1, file);
+    fwrite(&font.missingCharIndex, sizeof(u32), 1, file);
+    fwrite(sdf, sizeof(f32), bmw * bmh, file);
+    fwrite(font.xOffsets, sizeof(f32), font.totalCharacters, file);
+    fwrite(font.yOffsets, sizeof(f32), font.totalCharacters, file);
+    fwrite(font.widths, sizeof(f32), font.totalCharacters, file);
+    fwrite(font.heights, sizeof(f32), font.totalCharacters, file);
+    fwrite(font.bitmapXs, sizeof(f32), font.totalCharacters, file);
+    fwrite(font.bitmapYs, sizeof(f32), font.totalCharacters, file);
+    fwrite(font.bitmapWs, sizeof(f32), font.totalCharacters, file);
+    fwrite(font.bitmapHs, sizeof(f32), font.totalCharacters, file);
+    fwrite(font.kernings, sizeof(f32), font.totalCharacters, file);
+    fwrite(font.characterCodes, sizeof(u16), font.totalCharacters, file);
+    
+    fclose(file);
 
     WNDCLASS wc = {};
     wc.lpfnWndProc = WindowProc;
@@ -781,6 +1001,5 @@ s32 main(u32 argc, s8** argv) {
         }
     }
 
-    free(bitmap);
     return 0;
 }
