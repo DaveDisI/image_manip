@@ -34,7 +34,6 @@ struct Font {
     f32* bitmapYs;
     f32* bitmapWs;
     f32* bitmapHs;
-    f32* kernings;
     u16* characterCodes;
     u32 totalCharacters;
     u32 missingCharIndex;
@@ -47,7 +46,7 @@ ID2D1HwndRenderTarget* pRT = 0;
 ID2D1Bitmap* d2dBitmap = 0;
 u32 bmw, bmh;
 
-f32 scale = 2;
+f32 scale = 1;
 
 struct V2 {
     s16 x;
@@ -87,10 +86,10 @@ struct TrueTypeFont {
 
 struct GlyfBitmap {
     u8* data;
-    u32 x;
-    u32 y;
-    u32 w;
-    u32 h;
+    s32 x;
+    s32 y;
+    s32 w;
+    s32 h;
     u16 code;
 };
 
@@ -141,7 +140,6 @@ static void sortFontByCharCodes(Font* font){
                 swapValues(font->bitmapYs[i], font->bitmapYs[j]);
                 swapValues(font->bitmapWs[i], font->bitmapWs[j]);
                 swapValues(font->bitmapHs[i], font->bitmapHs[j]);
-                swapValues(font->kernings[i], font->kernings[j]);
                 swapValues(font->characterCodes[i], font->characterCodes[j]);
             }
         }
@@ -853,7 +851,8 @@ s32 main(u32 argc, s8** argv) {
     const u32 charCount = 128;
     u32 acc = 2;
     GlyfBitmap* glyfs = (GlyfBitmap*)malloc(sizeof(GlyfBitmap) * charCount);
-    glyfs[0].data = getGlyfBitmapFromCharCode(&ttf, 0, &glyfs[0], 0.039);
+    f32 scl = 0.08;
+    glyfs[0].data = getGlyfBitmapFromCharCode(&ttf, 0, &glyfs[0], scl);
     glyfs[1].data = 0;
     glyfs[1].code = ' ';
     glyfs[1].x = 0;
@@ -863,15 +862,15 @@ s32 main(u32 argc, s8** argv) {
 
     for (u32 i = 2; i < charCount; i++) {
         glyfs[i].code = ' ' + i - 1;
-        glyfs[i].data = getGlyfBitmapFromCharCode(&ttf, glyfs[i].code, &glyfs[i], 0.0388, false);
+        glyfs[i].data = getGlyfBitmapFromCharCode(&ttf, glyfs[i].code, &glyfs[i], scl, false);
         if (glyfs[i].w != 0) {
             acc++;
         }
     }
     sortGlyfBitmaps(glyfs, charCount);
 
-    bmw = 512;
-    bmh = 512;
+    bmw = 1024;
+    bmh = 1024;
     u32 bmSize = bmw * bmh * 4;
     u8* bitmap = (u8*)malloc(bmSize);
     memset(bitmap, 255, bmSize);
@@ -888,7 +887,6 @@ s32 main(u32 argc, s8** argv) {
     font.bitmapYs = (f32*)malloc(acc * sizeof(f32));
     font.bitmapWs = (f32*)malloc(acc * sizeof(f32));
     font.bitmapHs = (f32*)malloc(acc * sizeof(f32));
-    font.kernings = (f32*)malloc(acc * sizeof(f32));
     font.characterCodes = (u16*)malloc(acc * sizeof(u16));
 
     u32 dx = 10;
@@ -956,7 +954,6 @@ s32 main(u32 argc, s8** argv) {
     fwrite(font.bitmapYs, sizeof(f32), font.totalCharacters, file);
     fwrite(font.bitmapWs, sizeof(f32), font.totalCharacters, file);
     fwrite(font.bitmapHs, sizeof(f32), font.totalCharacters, file);
-    fwrite(font.kernings, sizeof(f32), font.totalCharacters, file);
     fwrite(font.characterCodes, sizeof(u16), font.totalCharacters, file);
     
     fclose(file);
