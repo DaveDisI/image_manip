@@ -849,19 +849,14 @@ s32 main(u32 argc, s8** argv) {
     initTrueTypeFont("ARIAL.TTF", &ttf);
 
     const u32 charCount = 128;
-    u32 acc = 2;
+    u32 acc = 1;
     GlyfBitmap* glyfs = (GlyfBitmap*)malloc(sizeof(GlyfBitmap) * charCount);
-    f32 scl = 0.08;
+    f32 scl = 0.078;
+    glyfs[0].code = 0;
     glyfs[0].data = getGlyfBitmapFromCharCode(&ttf, 0, &glyfs[0], scl);
-    glyfs[1].data = 0;
-    glyfs[1].code = ' ';
-    glyfs[1].x = 0;
-    glyfs[1].y = 0;
-    glyfs[1].w = 0;
-    glyfs[1].h = 0;
 
-    for (u32 i = 2; i < charCount; i++) {
-        glyfs[i].code = ' ' + i - 1;
+    for (u32 i = 1; i < charCount; i++) {
+        glyfs[i].code = ' ' + i;
         glyfs[i].data = getGlyfBitmapFromCharCode(&ttf, glyfs[i].code, &glyfs[i], scl, false);
         if (glyfs[i].w != 0) {
             acc++;
@@ -906,9 +901,6 @@ s32 main(u32 argc, s8** argv) {
 
         copyBitmaps(g->data, bitmap, g->w, g->h, dx, dy, bmw);
 
-        if(g->code == 0){
-            font.missingCharIndex = i;
-        }
         font.xOffsets[i] = g->x;
         font.yOffsets[i] = g->y;
         font.widths[i] = g->w;
@@ -926,6 +918,12 @@ s32 main(u32 argc, s8** argv) {
     }
 
     sortFontByCharCodes(&font);
+    for (u32 i = 0; i < acc; i++) {
+        if(font.characterCodes[i] == 0){
+            font.missingCharIndex = i;
+            break;
+        }
+    }
 
     f32* sdf = convertBitmapToSDF(bitmap, bmw, bmh, 4);
     u32 bct = 0;
