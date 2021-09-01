@@ -26,15 +26,14 @@ typedef double f64;
 
 struct Font {
     f32* bitmap;
-    f32* xOffsets;
-    f32* yOffsets;
-    f32* widths;
-    f32* heights;
-    f32* bitmapXs;
-    f32* bitmapYs;
-    f32* bitmapWs;
-    f32* bitmapHs;
-    u16* characterCodes;
+    f32 yOffsets[128];
+    f32 widths[128];
+    f32 heights[128];
+    f32 bitmapXs[128];
+    f32 bitmapYs[128];
+    f32 bitmapWs[128];
+    f32 bitmapHs[128];
+    u16 characterCodes[128];
     u32 totalCharacters;
     u32 missingCharIndex;
     u32 bmw;
@@ -132,7 +131,6 @@ static void sortFontByCharCodes(Font* font){
             u16 c1 = font->characterCodes[i];
             u16 c2 = font->characterCodes[j];
             if(c1 > c2){
-                swapValues(font->xOffsets[i], font->xOffsets[j]);
                 swapValues(font->yOffsets[i], font->yOffsets[j]);
                 swapValues(font->widths[i], font->widths[j]);
                 swapValues(font->heights[i], font->heights[j]);
@@ -186,7 +184,7 @@ static u8* createBitmapFromShape(GlyfShape* shape) {
     u32 ctr = 0;
     u32 bmsz = bmw * bmh * 4;
     u8* bitmap = (u8*)malloc(bmsz);
-    for (s16 y = shape->yMin; y < shape->yMax; y++) {
+    for (s16 y = shape->yMax - 1; y >= shape->yMin; y--) {
         for (s16 x = shape->xMin; x < shape->xMax; x++) {
             u8 color[] = {255, 255, 255, 255};
             s32 windCount = 0;
@@ -844,6 +842,78 @@ static void copyBitmaps(u8* src, u8* dst, u32 sw, u32 sh, u32 dx, u32 dy, u32 dw
     }
 }
 
+static void compressDataBlockBC4S(f32* dataBlock, u8* buffer){
+    /*
+        r0,
+        r1,
+        0b_ccbbbaaa,
+        0b_feeedddc,
+        0b_hhhgggff,
+        0b_kkjjjiii,
+        0b_nmmmlllk
+        ob_pppooonn
+
+
+        000 maxRed
+        001 minRed
+        010 closest to maxRed 
+        011 
+        100 
+        101 
+        110 
+        111 closest to minRed
+    */
+    s8 retOrder[] = {1, 7, 6, 5, 4, 3, 2, 0};
+    s8 minRed = 127;
+    s8 maxRed = -128;
+    s8 convertedData[16];
+    for(u32 i = 0; i < 16; i++){
+        s8 cd = dataBlock[i] * 127;
+        convertedData[i] = cd;
+        if(cd < minRed) minRed = cd;
+        if(cd > maxRed) maxRed = cd;
+    }
+
+    u64* dat = (u64*)buffer;
+    *dat = 0;
+    buffer[0] = maxRed;
+    buffer[1] = minRed;
+    s32 range = maxRed - minRed;
+
+    u32 shiftCtr = 16;
+    for(u32 i = 0; i < 16; i++){
+        s8 c = convertedData[i];
+        f32 redRat = (f32)(c - minRed) / (f32)range;
+        f32 redRet = redRat * 7.0f;
+        u32 redRetI = redRet;
+        f32 redDec = redRet - redRetI;
+        u64 redBits = redDec > 0.5 ? retOrder[redRetI + 1] : retOrder[redRetI];
+        *dat |= (redBits << shiftCtr);
+        shiftCtr += 3;
+    }
+}
+
+static void compressBC4S(f32* data, u32 width, u32 height, u8* buffer){
+    u32 compressedDataCtr = 0;
+    for(u32 y = 0; y < height; y += 4){
+        for(u32 x = 0; x < width; x += 4){
+            f32 dataBlock[16] = {};
+            u8 compressedBlock[8] = {};
+            u32 dbCtr = 0;
+            for(u32 j = y; j < y + 4; j++){
+                for(u32 i = x; i < x + 4; i++){
+                    u32 r = j * width + i;
+                    dataBlock[dbCtr++] = data[r];
+                }
+            }
+            compressDataBlockBC4S(dataBlock, compressedBlock);
+            for(u32 i = 0; i < 8; i++){
+                buffer[compressedDataCtr++] = compressedBlock[i];
+            }
+        }
+    }
+}
+
 s32 main(u32 argc, s8** argv) {
     TrueTypeFont ttf = {};
     initTrueTypeFont("ARIAL.TTF", &ttf);
@@ -874,15 +944,6 @@ s32 main(u32 argc, s8** argv) {
     font.bmw = bmw;
     font.bmh = bmh;
     font.totalCharacters = acc;
-    font.xOffsets = (f32*)malloc(acc * sizeof(f32));
-    font.yOffsets = (f32*)malloc(acc * sizeof(f32));
-    font.widths = (f32*)malloc(acc * sizeof(f32));
-    font.heights = (f32*)malloc(acc * sizeof(f32));
-    font.bitmapXs = (f32*)malloc(acc * sizeof(f32));
-    font.bitmapYs = (f32*)malloc(acc * sizeof(f32));
-    font.bitmapWs = (f32*)malloc(acc * sizeof(f32));
-    font.bitmapHs = (f32*)malloc(acc * sizeof(f32));
-    font.characterCodes = (u16*)malloc(acc * sizeof(u16));
 
     u32 dx = 10;
     u32 dy = 10;
@@ -901,7 +962,6 @@ s32 main(u32 argc, s8** argv) {
 
         copyBitmaps(g->data, bitmap, g->w, g->h, dx, dy, bmw);
 
-        font.xOffsets[i] = g->x;
         font.yOffsets[i] = g->y;
         font.widths[i] = g->w;
         font.heights[i] = g->h;
@@ -934,6 +994,9 @@ s32 main(u32 argc, s8** argv) {
         bitmap[bct++] = (u8)v;
         bitmap[bct++] = 255;
     }
+
+    u8* compressedSDF = (u8*)malloc(font.bmw * font.bmh);
+    compressBC4S(sdf, font.bmw, font.bmh, compressedSDF);
     
     font.bitmap = sdf;
 
@@ -943,8 +1006,8 @@ s32 main(u32 argc, s8** argv) {
     fwrite(&font.bmh, sizeof(u32), 1, file);
     fwrite(&font.totalCharacters, sizeof(u32), 1, file);
     fwrite(&font.missingCharIndex, sizeof(u32), 1, file);
-    fwrite(sdf, sizeof(f32), bmw * bmh, file);
-    fwrite(font.xOffsets, sizeof(f32), font.totalCharacters, file);
+    // fwrite(sdf, sizeof(f32), bmw * bmh, file);
+    fwrite(compressedSDF, 1, bmw * bmh, file);
     fwrite(font.yOffsets, sizeof(f32), font.totalCharacters, file);
     fwrite(font.widths, sizeof(f32), font.totalCharacters, file);
     fwrite(font.heights, sizeof(f32), font.totalCharacters, file);
