@@ -215,7 +215,7 @@ u32 parseHuffmanCodeFromData(u8* data, u32* offset, PNGHuffman* pngh){
 }
 
 s32 main(u32 argc, s8** argv){
-    s8* fileName = "weird_diffuse.png";
+    s8* fileName = "dice.png";
     FILE* fileHandle = fopen(fileName, "rb");
     fseek(fileHandle, 0L, SEEK_END);
     u32 fileSize = ftell(fileHandle);
@@ -582,7 +582,7 @@ s32 main(u32 argc, s8** argv){
         uncompressedDataSize = dataWidthAlphaSize;
     }
     
-    fileHandle = fopen("weird.texpix", "wb");
+    fileHandle = fopen("dice.texpix", "wb");
     fwrite(&width, sizeof(u32), 1, fileHandle);
     fwrite(&height, sizeof(u32), 1, fileHandle);
     fwrite(uncompressedData, sizeof(u8), uncompressedDataSize, fileHandle);

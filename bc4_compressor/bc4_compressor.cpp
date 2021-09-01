@@ -42,23 +42,10 @@ static void compressDataBlock(u8* dataBlock, u8* buffer){
     }
 }
 
-int main(int argc, char** argv){
-    s8* fileName = "debug_font.texpix";
-    s8* outFileName = "debug_font.bc4";
-    
-    u32 width = 0;
-    u32 height = 0;
-    FILE* file = fopen(fileName, "rb");
-    fread(&width, 4, 1, file);
-    fread(&height, 4, 1, file);
-    u32 dataSize = width * height * 4;
-    u8* uncompressedData = (u8*)malloc(dataSize);
-    fread(uncompressedData, 1, dataSize, file);
-    fclose(file);
-
-    u32 compressedDataSize = width * height;
+static u8* compressBC4(u8* uncompressedData, u32 width, u32 height, u32* compressedDataSize){
+    *compressedDataSize = width * height;
     u32 compressedDataCtr = 0;
-    u8* compressedData = (u8*)malloc(compressedDataSize);
+    u8* compressedData = (u8*)malloc(*compressedDataSize);
 
     for(u32 y = 0; y < height; y += 4){
         for(u32 x = 0; x < width; x += 4){
@@ -77,6 +64,26 @@ int main(int argc, char** argv){
             }
         }
     }
+
+    return compressedData;
+}
+
+int main(int argc, char** argv){
+    s8* fileName = "debug_font.texpix";
+    s8* outFileName = "debug_font.bc4";
+    
+    u32 width = 0;
+    u32 height = 0;
+    FILE* file = fopen(fileName, "rb");
+    fread(&width, 4, 1, file);
+    fread(&height, 4, 1, file);
+    u32 dataSize = width * height * 4;
+    u8* uncompressedData = (u8*)malloc(dataSize);
+    fread(uncompressedData, 1, dataSize, file);
+    fclose(file);
+
+    u32 compressedDataSize;
+    u8* compressedData = compressBC4(uncompressedData, width, height, &compressedDataSize);
 
     file = fopen(outFileName, "wb");
     fwrite(&width, 4, 1, file);
