@@ -805,6 +805,7 @@ static u8* uncompressPNG(const s8* fileName, u32* width, u32* height){
 }
 
 s32 main(s32 argc, s8** argv){
+    // texture_generator C:/Users/Dave/Desktop/art/test_diffuse.png C:/Users/Dave/Desktop/output.texpix none true
     if(argc < 4){
         printf("Arguments required:\n");
         printf("texture_generator <input file> <output file> <compression type [none, bc1, bc4, bc5]>\n");
@@ -834,12 +835,90 @@ s32 main(s32 argc, s8** argv){
     u8* uncompressedData = uncompressPNG(inputFile, &width, &height);
     u32 uncompressedDataSize = width * height * 4;
 
+    u32 mipLevels = 0;
+    u32 mmSize = 0;
+    if(argc > 4 && compareStrings(argv[4], "true")){
+        if(width != height){
+            printf("Must be square texture for mipmaps.\n");
+            return 0;
+        }
+        f32 w = width / 2;
+        u32 mmd = w;
+        
+        while(w > 3){
+            mmSize +=  w * w * 4;
+            mipLevels++;
+            w *= 0.5;
+        }
+    }
+
+    if(mipLevels > 0){
+        uncompressedData = (u8*)realloc(uncompressedData, uncompressedDataSize + mmSize);
+        u8* rPtr = uncompressedData;
+        u8* wPtr = uncompressedData + uncompressedDataSize;
+        u32 wCtr = 0;
+
+        u32 mmW = width;
+        u32 mmH = height;
+        for(u32 i = 0; i < mipLevels; i++){
+            for(u32 y = 0; y < mmH; y += 2){
+                for(u32 x = 0; x < mmW; x += 2){
+                    u32 idx = y * mmW * 4 + x * 4;
+                    u32 idx2 = (y + 1) * mmW * 4 + x * 4;
+                    
+                    u32 r1 = rPtr[idx + 0];
+                    u32 g1 = rPtr[idx + 1];
+                    u32 b1 = rPtr[idx + 2];
+                    u32 a1 = rPtr[idx + 3];
+
+                    u32 r2 = rPtr[idx + 4];
+                    u32 g2 = rPtr[idx + 5];
+                    u32 b2 = rPtr[idx + 6];
+                    u32 a2 = rPtr[idx + 7];
+
+                    u32 r3 = rPtr[idx2 + 0];
+                    u32 g3 = rPtr[idx2 + 1];
+                    u32 b3 = rPtr[idx2 + 2];
+                    u32 a3 = rPtr[idx2 + 3];
+
+                    u32 r4 = rPtr[idx2 + 4];
+                    u32 g4 = rPtr[idx2 + 5];
+                    u32 b4 = rPtr[idx2 + 6];
+                    u32 a4 = rPtr[idx2 + 7];
+
+                    u32 ra = r1 + r2 + r3 + r4;
+                    u32 ga = g1 + g2 + g3 + g4;
+                    u32 ba = b1 + b2 + b3 + b4;
+                    u32 aa = a1 + a2 + a3 + a4;
+                    ra /= 4;
+                    ga /= 4;
+                    ba /= 4;
+                    aa /= 4;
+                    wPtr[wCtr++] = ra;
+                    wPtr[wCtr++] = ga;
+                    wPtr[wCtr++] = ba;
+                    wPtr[wCtr++] = aa;
+                }
+            }
+
+            rPtr += mmW * mmH * 4;
+            mmW /= 2;
+            mmH /= 2;
+        }
+        
+    }   
+
     switch(compressionIndex){
         case NO_COMPRESSION:{
             FILE* fileHandle = fopen(outputFile, "wb");
             fwrite(&width, sizeof(u32), 1, fileHandle);
             fwrite(&height, sizeof(u32), 1, fileHandle);
-            fwrite(uncompressedData, sizeof(u8), uncompressedDataSize, fileHandle);
+
+            if(mipLevels > 0){
+                fwrite(&mipLevels, sizeof(u32), 1, fileHandle);
+            }
+
+            fwrite(uncompressedData, sizeof(u8), uncompressedDataSize + mmSize, fileHandle);
             fclose(fileHandle);
             break;
         }
@@ -858,7 +937,7 @@ s32 main(s32 argc, s8** argv){
         case BC4_COMPRESSION:{
             u32 compressedDataSize = uncompressedDataSize / 4;
             u8* compressedData = (u8*)malloc(compressedDataSize);
-            compressDataBC4(width, height, uncompressedData, compressedData);
+            compressBC4(width, height, uncompressedData, compressedData);
             FILE* fileHandle = fopen(outputFile, "wb");
             fwrite(&width, sizeof(u32), 1, fileHandle);
             fwrite(&height, sizeof(u32), 1, fileHandle);
