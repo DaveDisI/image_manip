@@ -835,7 +835,7 @@ s32 main(s32 argc, s8** argv){
     u8* uncompressedData = uncompressPNG(inputFile, &width, &height);
     u32 uncompressedDataSize = width * height * 4;
 
-    u32 mipLevels = 0;
+    u32 mipLevels = 1;
     u32 mmSize = 0;
     if(argc > 4 && compareStrings(argv[4], "true")){
         if(width != height){
@@ -852,7 +852,7 @@ s32 main(s32 argc, s8** argv){
         }
     }
 
-    if(mipLevels > 0){
+    if(mipLevels > 1){
         uncompressedData = (u8*)realloc(uncompressedData, uncompressedDataSize + mmSize);
         u8* rPtr = uncompressedData;
         u8* wPtr = uncompressedData + uncompressedDataSize;
@@ -861,6 +861,7 @@ s32 main(s32 argc, s8** argv){
         u32 mmW = width;
         u32 mmH = height;
         for(u32 i = 0; i < mipLevels; i++){
+            printf("%i\n", mmW);
             for(u32 y = 0; y < mmH; y += 2){
                 for(u32 x = 0; x < mmW; x += 2){
                     u32 idx = y * mmW * 4 + x * 4;
