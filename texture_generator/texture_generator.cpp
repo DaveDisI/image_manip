@@ -805,7 +805,7 @@ static u8* uncompressPNG(const s8* fileName, u32* width, u32* height){
 }
 
 s32 main(s32 argc, s8** argv){
-    // texture_generator C:/Users/Dave/Desktop/art/test_diffuse.png C:/Users/Dave/Desktop/output.bc1 bc1 true
+    // texture_generator C:/Users/Dave/Desktop/art/test_normal.png C:/Users/Dave/Desktop/output.bc5 bc5 true
     if(argc < 4){
         printf("Arguments required:\n");
         printf("texture_generator <input file> <output file> <compression type [none, bc1, bc4, bc5]>\n");
@@ -913,7 +913,7 @@ s32 main(s32 argc, s8** argv){
             FILE* fileHandle = fopen(outputFile, "wb");
             fwrite(&width, sizeof(u32), 1, fileHandle);
             fwrite(&height, sizeof(u32), 1, fileHandle);
-            if(mipLevels > 0){
+            if(mipLevels > 1){
                 fwrite(&mipLevels, sizeof(u32), 1, fileHandle);
             }
 
@@ -928,7 +928,7 @@ s32 main(s32 argc, s8** argv){
             FILE* fileHandle = fopen(outputFile, "wb");
             fwrite(&width, sizeof(u32), 1, fileHandle);
             fwrite(&height, sizeof(u32), 1, fileHandle);
-            if(mipLevels > 0){
+            if(mipLevels > 1){
                 fwrite(&mipLevels, sizeof(u32), 1, fileHandle);
             }
 
@@ -968,7 +968,23 @@ s32 main(s32 argc, s8** argv){
             FILE* fileHandle = fopen(outputFile, "wb");
             fwrite(&width, sizeof(u32), 1, fileHandle);
             fwrite(&height, sizeof(u32), 1, fileHandle);
+            if(mipLevels > 1){
+                fwrite(&mipLevels, sizeof(u32), 1, fileHandle);
+            }
+
             fwrite(compressedData, sizeof(u8), compressedDataSize, fileHandle);
+
+            u8* rPtr = uncompressedData + uncompressedDataSize;
+            u32 d = width / 2;
+            for(u32 i = 1; i < mipLevels; i++){
+                u32 sz = d * d * 4;
+                compressedDataSize = sz / 4;
+                compressPixelDataBC5(d, d, rPtr, compressedData);
+                fwrite(compressedData, sizeof(u8), compressedDataSize, fileHandle);
+                rPtr += sz;
+                d /= 2;
+            }
+
             fclose(fileHandle);
             free(compressedData);
             break;
