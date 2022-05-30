@@ -950,13 +950,28 @@ s32 main(s32 argc, s8** argv){
             break;
         }
         case BC4_COMPRESSION:{
-            u32 compressedDataSize = uncompressedDataSize / 4;
+            u32 compressedDataSize = uncompressedDataSize / 8;
             u8* compressedData = (u8*)malloc(compressedDataSize);
             compressBC4(width, height, uncompressedData, compressedData);
             FILE* fileHandle = fopen(outputFile, "wb");
             fwrite(&width, sizeof(u32), 1, fileHandle);
             fwrite(&height, sizeof(u32), 1, fileHandle);
+            if(mipLevels > 1){
+                fwrite(&mipLevels, sizeof(u32), 1, fileHandle);
+            }
             fwrite(compressedData, sizeof(u8), compressedDataSize, fileHandle);
+
+            u8* rPtr = uncompressedData + uncompressedDataSize;
+            u32 d = width / 2;
+            for(u32 i = 1; i < mipLevels; i++){
+                u32 sz = d * d * 4;
+                compressedDataSize = sz / 8;
+                compressBC4(d, d, rPtr, compressedData);
+                fwrite(compressedData, sizeof(u8), compressedDataSize, fileHandle);
+                rPtr += sz;
+                d /= 2;
+            }
+
             fclose(fileHandle);
             free(compressedData);
             break;
