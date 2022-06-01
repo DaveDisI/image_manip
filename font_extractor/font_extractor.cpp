@@ -851,7 +851,7 @@ static void compressDataBlockBC4S(f32* dataBlock, u8* buffer){
         0b_hhhgggff,
         0b_kkjjjiii,
         0b_nmmmlllk
-        ob_pppooonn
+        0b_pppooonn
 
 
         000 maxRed

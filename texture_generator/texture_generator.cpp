@@ -25,10 +25,11 @@ typedef double f64;
                   ((x << 16) & 0x0000ff0000000000) | ((x >> 16) & 0x0000000000ff0000) | \
                   ((x <<  8) & 0x000000ff00000000) | ((x >>  8) & 0x00000000ff000000))
 
-#define NO_COMPRESSION 0
-#define BC1_COMPRESSION 1
-#define BC4_COMPRESSION 2
-#define BC5_COMPRESSION 3
+#define NO_COMPRESSION   0
+#define BC1_COMPRESSION  1
+#define BC4S_COMPRESSION 2
+#define BC4U_COMPRESSION 3
+#define BC5_COMPRESSION  4
 
 struct PNGHuffman {
     u32 totalCodes;
@@ -282,49 +283,145 @@ static void compressPixelDataBC5(u32 width, u32 height, u8* data, u8* buffer){
     }
 }
 
-static void compressDataBlockBC4(u8* dataBlock, u8* buffer){
-    u8 retOrder[] = {1, 7, 6, 5, 4, 3, 2, 0};
-    u8 minRed = 255;
-    u8 maxRed = 0;
+static void compressDataBlockBC4S(f32* dataBlock, u8* buffer){
+    /*
+        r0,
+        r1,
+        0b_ccbbbaaa,
+        0b_feeedddc,
+        0b_hhhgggff,
+        0b_kkjjjiii,
+        0b_nmmmlllk
+        0b_pppooonn
 
-    for(u32 i = 0; i < 16; i += 2){
-        if(dataBlock[i] < minRed) minRed = dataBlock[i];
-        if(dataBlock[i] > maxRed) maxRed = dataBlock[i];
+
+        000 maxRed
+        001 minRed
+        010 closest to maxRed 
+        011 
+        100 
+        101 
+        110 
+        111 closest to minRed
+    */
+   
+    s8 retOrder[] = {1, 7, 6, 5, 4, 3, 2, 0};
+    s8 minRed = 127;
+    s8 maxRed = -128;
+    s8 convertedData[16];
+    for(u32 i = 0; i < 16; i++){
+        s8 cd = dataBlock[i] * 127;
+        convertedData[i] = cd;
+        if(cd < minRed) minRed = cd;
+        if(cd > maxRed) maxRed = cd;
     }
 
-    u64* rBuf64 = (u64*)&buffer[0];
-    *rBuf64 = maxRed;
-    *rBuf64 |= ((u32)minRed << 8);
-     
-    u32 shiftCtr = 8;
-    u8 redRange = maxRed - minRed;
-    for(u32 i = 0; i < 16; i += 2){
-        u8 r = dataBlock[i];
-        f32 redRat = (f32)(r - minRed) / (f32)redRange;
+    u64* dat = (u64*)buffer;
+    *dat = 0;
+    buffer[0] = maxRed;
+    buffer[1] = minRed;
+    s32 range = maxRed - minRed;
+
+    u32 shiftCtr = 16;
+    for(u32 i = 0; i < 16; i++){
+        s8 c = convertedData[i];
+        f32 redRat = (f32)(c - minRed) / (f32)range;
         f32 redRet = redRat * 7.0f;
         u32 redRetI = redRet;
         f32 redDec = redRet - redRetI;
         u64 redBits = redDec > 0.5 ? retOrder[redRetI + 1] : retOrder[redRetI];
-        *rBuf64 |= (redBits << shiftCtr);
+        *dat |= (redBits << shiftCtr);
         shiftCtr += 3;
     }
 }
 
-static void compressBC4(u32 width, u32 height, u8* data, u8* buffer){
+static void compressBC4S(f32* data, u32 width, u32 height, u8* buffer){
     u32 compressedDataCtr = 0;
-
     for(u32 y = 0; y < height; y += 4){
         for(u32 x = 0; x < width; x += 4){
-            u8 dataBlock[16] = {};
+            f32 dataBlock[16] = {};
             u8 compressedBlock[8] = {};
             u32 dbCtr = 0;
             for(u32 j = y; j < y + 4; j++){
                 for(u32 i = x; i < x + 4; i++){
-                    u32 r = (j * width * 4) + (i * 4);
+                    u32 r = j * width + i;
                     dataBlock[dbCtr++] = data[r];
                 }
             }
-            compressDataBlockBC4(dataBlock, compressedBlock);
+            compressDataBlockBC4S(dataBlock, compressedBlock);
+            for(u32 i = 0; i < 8; i++){
+                buffer[compressedDataCtr++] = compressedBlock[i];
+            }
+        }
+    }
+}
+
+static void compressDataBlockBC4U(f32* dataBlock, u8* buffer){
+    /*
+        r0,
+        r1,
+        0b_ccbbbaaa,
+        0b_feeedddc,
+        0b_hhhgggff,
+        0b_kkjjjiii,
+        0b_nmmmlllk
+        0b_pppooonn
+
+
+        000 maxRed
+        001 minRed
+        010 closest to maxRed 
+        011 
+        100 
+        101 
+        110 
+        111 closest to minRed
+    */
+   
+    s8 retOrder[] = {1, 7, 6, 5, 4, 3, 2, 0};
+    u8 minRed = 255;
+    u8 maxRed = 0;
+    u8 convertedData[16];
+    for(u32 i = 0; i < 16; i++){
+        u8 cd = dataBlock[i] * 255;
+        convertedData[i] = cd;
+        if(cd < minRed) minRed = cd;
+        if(cd > maxRed) maxRed = cd;
+    }
+
+    u64* dat = (u64*)buffer;
+    *dat = 0;
+    buffer[0] = maxRed;
+    buffer[1] = minRed;
+    u32 range = maxRed - minRed;
+
+    u32 shiftCtr = 16;
+    for(u32 i = 0; i < 16; i++){
+        u8 c = convertedData[i];
+        f32 redRat = (f32)(c - minRed) / (f32)range;
+        f32 redRet = redRat * 7.0f;
+        u32 redRetI = redRet;
+        f32 redDec = redRet - redRetI;
+        u64 redBits = redDec > 0.5 ? retOrder[redRetI + 1] : retOrder[redRetI];
+        *dat |= (redBits << shiftCtr);
+        shiftCtr += 3;
+    }
+}
+
+static void compressBC4U(f32* data, u32 width, u32 height, u8* buffer){
+    u32 compressedDataCtr = 0;
+    for(u32 y = 0; y < height; y += 4){
+        for(u32 x = 0; x < width; x += 4){
+            f32 dataBlock[16] = {};
+            u8 compressedBlock[8] = {};
+            u32 dbCtr = 0;
+            for(u32 j = y; j < y + 4; j++){
+                for(u32 i = x; i < x + 4; i++){
+                    u32 r = j * width + i;
+                    dataBlock[dbCtr++] = data[r];
+                }
+            }
+            compressDataBlockBC4S(dataBlock, compressedBlock);
             for(u32 i = 0; i < 8; i++){
                 buffer[compressedDataCtr++] = compressedBlock[i];
             }
@@ -434,7 +531,7 @@ static u32 parseHuffmanCodeFromData(u8* data, u32* offset, PNGHuffman* pngh){
     return -1;
 }
 
-static u8* uncompressPNG(const s8* fileName, u32* width, u32* height){
+static u8* uncompressPNG(const s8* fileName, u32* width, u32* height, u32* componentsPerPixel, u32* bitsPerComponent){
     FILE* fileHandle = fopen(fileName, "rb");
     fseek(fileHandle, 0L, SEEK_END);
     u32 fileSize = ftell(fileHandle);
@@ -484,21 +581,34 @@ static u8* uncompressPNG(const s8* fileName, u32* width, u32* height){
                 interlaceMethod = *filePtr++;
 
                 switch(colorType){
-                    case 0:
-                    case 3:{
+                    case 0:{
                         bitsPerPixel = bitDepth;
+                        *componentsPerPixel = 1;
+                        *bitsPerComponent = bitDepth;
                         break;
                     }
                     case 2:{
                         bitsPerPixel = bitDepth * 3;
+                        *componentsPerPixel = 3;
+                        *bitsPerComponent = bitDepth;
+                        break;
+                    }
+                    case 3:{
+                        bitsPerPixel = bitDepth;
+                        *componentsPerPixel = 4;
+                        *bitsPerComponent = 8;
                         break;
                     }
                     case 4:{
                         bitsPerPixel = bitDepth * 2;
+                        *componentsPerPixel = 2;
+                        *bitsPerComponent = bitDepth;
                         break;
                     }
                     case 6:{
                         bitsPerPixel = bitDepth * 4;
+                        *componentsPerPixel = 4;
+                        *bitsPerComponent = bitDepth;
                         break;
                     }
                 }
@@ -513,6 +623,9 @@ static u8* uncompressPNG(const s8* fileName, u32* width, u32* height){
                 break;
             }
             case IEND:{
+                break;
+            }
+            case PLTE:{
                 break;
             }
             default:{
@@ -805,39 +918,50 @@ static u8* uncompressPNG(const s8* fileName, u32* width, u32* height){
 }
 
 s32 main(s32 argc, s8** argv){
-    // texture_generator C:/Users/Dave/Desktop/art/test_normal.png C:/Users/Dave/Desktop/output.bc5 bc5 true
-    if(argc < 4){
-        printf("Arguments required:\n");
-        printf("texture_generator <input file> <output file> <compression type [none, bc1, bc4, bc5]>\n");
-        return 0;
-    }
+    // texture_generator C:/Users/Dave/Desktop/art/test_normal.png C:/Users/Dave/Desktop/output.bc5 bc5 true 
+    // if(argc < 4){
+    //     printf("Arguments required:\n");
+    //     printf("texture_generator <input file> <output file> <compression type [none, bc1, bc4, bc5]>\n");
+    //     return 0;
+    // }
 
-    s8* inputFile = argv[1];
-    s8* outputFile = argv[2];
-    s8* compressionType = argv[3];
+    // s8* inputFile = argv[1];
+    // s8* outputFile = argv[2];
+    // s8* compressionType = argv[3];
+    // u32 compressionIndex = -1;
+    const s8* inputFile = "C:/Users/Dave/Desktop/art/metal_roughness.png";
+    const s8* outputFile = "C:/Users/Dave/Desktop/metal_roughness.bc4";
+    const s8* compressionType = "bc4u";
     u32 compressionIndex = -1;
 
     if(compareStrings(compressionType, "none")){
         compressionIndex = NO_COMPRESSION;
     }else if(compareStrings(compressionType, "bc1")){
         compressionIndex = BC1_COMPRESSION;
-    }else if(compareStrings(compressionType, "bc4")){
-        compressionIndex = BC4_COMPRESSION;
+    }else if(compareStrings(compressionType, "bc4s")){
+        compressionIndex = BC4S_COMPRESSION;
+    }else if(compareStrings(compressionType, "bc4u")){
+        compressionIndex = BC4U_COMPRESSION;
     }else if(compareStrings(compressionType, "bc5")){
         compressionIndex = BC5_COMPRESSION;
     }else{
-        printf("Invalid Compression Type. Use \'none\', \'bc1\', \'bc4\', or \'bc5\'.");
+        printf("Invalid Compression Type. Use \'none\', \'bc1\', \'bc4s\', \'bc4u\', or \'bc5\'.");
         return 0;
     }
 
     u32 width;
     u32 height;
-    u8* uncompressedData = uncompressPNG(inputFile, &width, &height);
-    u32 uncompressedDataSize = width * height * 4;
+    u32 componentsPerPixel;
+    u32 bitsPerComponent;
+    u8* uncompressedData = uncompressPNG(inputFile, &width, &height, &componentsPerPixel, &bitsPerComponent);
+    u32 uncompressedBitSize = width * height * componentsPerPixel * bitsPerComponent;
+    u32 ucdib = uncompressedBitSize / 8;
+    u32 uncompressedDataSize = ucdib % 8 == 0 ? ucdib : ucdib + 1;
 
     u32 mipLevels = 1;
     u32 mmSize = 0;
-    if(argc > 4 && compareStrings(argv[4], "true")){
+    // if(argc > 4 && compareStrings(argv[4], "true")){
+    if(true){
         if(width != height){
             printf("Must be square texture for mipmaps.\n");
             return 0;
@@ -852,7 +976,7 @@ s32 main(s32 argc, s8** argv){
         }
     }
 
-    if(mipLevels > 1){
+    if(mipLevels > 1 && componentsPerPixel > 1){
         uncompressedData = (u8*)realloc(uncompressedData, uncompressedDataSize + mmSize);
         u8* rPtr = uncompressedData;
         u8* wPtr = uncompressedData + uncompressedDataSize;
@@ -905,7 +1029,6 @@ s32 main(s32 argc, s8** argv){
             mmW /= 2;
             mmH /= 2;
         }
-        
     }   
 
     switch(compressionIndex){
@@ -949,31 +1072,67 @@ s32 main(s32 argc, s8** argv){
             free(compressedData);
             break;
         }
-        case BC4_COMPRESSION:{
-            u32 compressedDataSize = uncompressedDataSize / 8;
-            u8* compressedData = (u8*)malloc(compressedDataSize);
-            compressBC4(width, height, uncompressedData, compressedData);
-            FILE* fileHandle = fopen(outputFile, "wb");
-            fwrite(&width, sizeof(u32), 1, fileHandle);
-            fwrite(&height, sizeof(u32), 1, fileHandle);
-            if(mipLevels > 1){
-                fwrite(&mipLevels, sizeof(u32), 1, fileHandle);
-            }
-            fwrite(compressedData, sizeof(u8), compressedDataSize, fileHandle);
+        case BC4U_COMPRESSION:{
+            if(componentsPerPixel == 1){
+                u32 totalPixels = width * height;
+                u32 compressedDataSize = totalPixels / 2;
+                u32 ucDataSize = totalPixels * sizeof(f32);
+                f32* ucData = (f32*)malloc(ucDataSize);
+                u8* compressedData = (u8*)malloc(compressedDataSize);
+                if(bitsPerComponent == 8){
+                    for(u32 i = 0; i < totalPixels; i++){
+                        ucData[i] = (f32)uncompressedData[i] / 255.0;
+                    }
+                    compressBC4U(ucData, width, height, compressedData);
+                }else if(bitsPerComponent == 16){
+                    for(u32 i = 0; i < totalPixels; i++){
+                        u16 v = *(u16*)&uncompressedData[i * 2];
+                        ucData[i] = (f32)v / 65535.0;
+                    }
+                    compressBC4U(ucData, width, height, compressedData);
 
-            u8* rPtr = uncompressedData + uncompressedDataSize;
-            u32 d = width / 2;
-            for(u32 i = 1; i < mipLevels; i++){
-                u32 sz = d * d * 4;
-                compressedDataSize = sz / 8;
-                compressBC4(d, d, rPtr, compressedData);
-                fwrite(compressedData, sizeof(u8), compressedDataSize, fileHandle);
-                rPtr += sz;
-                d /= 2;
-            }
+                    FILE* fileHandle = fopen(outputFile, "wb");
+                    fwrite(&width, sizeof(u32), 1, fileHandle);
+                    fwrite(&height, sizeof(u32), 1, fileHandle);
+                    if(mipLevels > 1){
+                        fwrite(&mipLevels, sizeof(u32), 1, fileHandle);
+                        fwrite(compressedData, sizeof(u8), compressedDataSize, fileHandle);
 
-            fclose(fileHandle);
-            free(compressedData);
+                        u32 d = width;
+                        f32* mmDat = (f32*)malloc(ucDataSize * 2);
+                        f32* rptr = ucData;
+                        f32* wptr = mmDat;
+                        while(d > 1){
+                            u32 sz = ((d  / 2) * (d / 2)) / 2;
+                            u32 wctr = 0;
+                            for(u32 y = 0; y < d; y += 2){
+                                for(u32 x = 0; x < d; x += 2){
+                                    u32 i1 = y * d + x;
+                                    u32 i2 = (y + 1) * d + x;
+                                    f32 v1 = rptr[i1];
+                                    f32 v2 = rptr[i1 + 1];
+                                    f32 v3 = rptr[i2];
+                                    f32 v4 = rptr[i2 + 1];
+                                    f32 avg = (v1 + v2 + v3 + v4) * 0.25;
+                                    wptr[wctr++] = avg;
+                                }
+                            }
+                            compressBC4U(wptr, d, d, compressedData);
+                            fwrite(compressedData, sizeof(u8), sz, fileHandle);
+                            rptr = wptr;
+                            wptr += wctr;
+                            d /= 2;
+                        }
+                        free(mmDat);
+                    }else{
+                        fwrite(compressedData, sizeof(u8), compressedDataSize, fileHandle);
+                    }
+
+                    fclose(fileHandle);
+                    free(compressedData);
+                    free(ucData);
+                }
+            }
             break;
         }
         case BC5_COMPRESSION:{
