@@ -1083,55 +1083,54 @@ s32 main(s32 argc, s8** argv){
                     for(u32 i = 0; i < totalPixels; i++){
                         ucData[i] = (f32)uncompressedData[i] / 255.0;
                     }
-                    compressBC4U(ucData, width, height, compressedData);
                 }else if(bitsPerComponent == 16){
                     for(u32 i = 0; i < totalPixels; i++){
                         u16 v = *(u16*)&uncompressedData[i * 2];
                         ucData[i] = (f32)v / 65535.0;
                     }
-                    compressBC4U(ucData, width, height, compressedData);
-
-                    FILE* fileHandle = fopen(outputFile, "wb");
-                    fwrite(&width, sizeof(u32), 1, fileHandle);
-                    fwrite(&height, sizeof(u32), 1, fileHandle);
-                    if(mipLevels > 1){
-                        fwrite(&mipLevels, sizeof(u32), 1, fileHandle);
-                        fwrite(compressedData, sizeof(u8), compressedDataSize, fileHandle);
-
-                        u32 d = width;
-                        f32* mmDat = (f32*)malloc(ucDataSize * 2);
-                        f32* rptr = ucData;
-                        f32* wptr = mmDat;
-                        while(d > 1){
-                            u32 sz = ((d  / 2) * (d / 2)) / 2;
-                            u32 wctr = 0;
-                            for(u32 y = 0; y < d; y += 2){
-                                for(u32 x = 0; x < d; x += 2){
-                                    u32 i1 = y * d + x;
-                                    u32 i2 = (y + 1) * d + x;
-                                    f32 v1 = rptr[i1];
-                                    f32 v2 = rptr[i1 + 1];
-                                    f32 v3 = rptr[i2];
-                                    f32 v4 = rptr[i2 + 1];
-                                    f32 avg = (v1 + v2 + v3 + v4) * 0.25;
-                                    wptr[wctr++] = avg;
-                                }
-                            }
-                            compressBC4U(wptr, d, d, compressedData);
-                            fwrite(compressedData, sizeof(u8), sz, fileHandle);
-                            rptr = wptr;
-                            wptr += wctr;
-                            d /= 2;
-                        }
-                        free(mmDat);
-                    }else{
-                        fwrite(compressedData, sizeof(u8), compressedDataSize, fileHandle);
-                    }
-
-                    fclose(fileHandle);
-                    free(compressedData);
-                    free(ucData);
                 }
+                compressBC4U(ucData, width, height, compressedData);
+
+                FILE* fileHandle = fopen(outputFile, "wb");
+                fwrite(&width, sizeof(u32), 1, fileHandle);
+                fwrite(&height, sizeof(u32), 1, fileHandle);
+                if(mipLevels > 1){
+                    fwrite(&mipLevels, sizeof(u32), 1, fileHandle);
+                    fwrite(compressedData, sizeof(u8), compressedDataSize, fileHandle);
+
+                    u32 d = width;
+                    f32* mmDat = (f32*)malloc(ucDataSize * 2);
+                    f32* rptr = ucData;
+                    f32* wptr = mmDat;
+                    while(d > 1){
+                        u32 sz = ((d  / 2) * (d / 2)) / 2;
+                        u32 wctr = 0;
+                        for(u32 y = 0; y < d; y += 2){
+                            for(u32 x = 0; x < d; x += 2){
+                                u32 i1 = y * d + x;
+                                u32 i2 = (y + 1) * d + x;
+                                f32 v1 = rptr[i1];
+                                f32 v2 = rptr[i1 + 1];
+                                f32 v3 = rptr[i2];
+                                f32 v4 = rptr[i2 + 1];
+                                f32 avg = (v1 + v2 + v3 + v4) * 0.25;
+                                wptr[wctr++] = avg;
+                            }
+                        }
+                        compressBC4U(wptr, d, d, compressedData);
+                        fwrite(compressedData, sizeof(u8), sz, fileHandle);
+                        rptr = wptr;
+                        wptr += wctr;
+                        d /= 2;
+                    }
+                    free(mmDat);
+                }else{
+                    fwrite(compressedData, sizeof(u8), compressedDataSize, fileHandle);
+                }
+
+                fclose(fileHandle);
+                free(compressedData);
+                free(ucData);
             }
             break;
         }
