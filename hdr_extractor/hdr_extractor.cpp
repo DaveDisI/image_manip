@@ -40,16 +40,16 @@ static u32 getLineFromFile(u8* fileData, u8* buffer){
     return ++ctr;
 }
 
-static void rgbeToF32RGB(u8* rgbe, f32 *red, f32 *green, f32 *blue){
+static void rgbeToF32RGB(u8* rgbe, f32 *r, f32 *g, f32 *b){
     if (rgbe[3] > 0) { 
         f32 f = ldexp(1.0, (s32)rgbe[3] - 136);
-        *red = rgbe[0] * f;
-        *green = rgbe[1] * f;
-        *blue = rgbe[2] * f;
+        *r = rgbe[0] * f;
+        *g = rgbe[1] * f;
+        *b = rgbe[2] * f;
     } else {
-        *red = 0;
-        *green = 0;
-        *blue = 0;
+        *r = 0;
+        *g = 0;
+        *b = 0;
     }
 }
 
@@ -201,36 +201,110 @@ static f32* extractHDR(const s8* filename, u32* width, u32* height){
             uncompressedData[fIdx + 2] = b;
         }
     }
+    free(fileContents);
     free(rgbeData);
 
     return uncompressedData;
 }
 
+static void generateMipmaps(f32** data, u32 size, u32* totalMips, u32* newDataSize){
+    u32 mips = 0;
+    u32 dataSize = 0;
+    u32 d = size;
+    while(d > 2){
+        mips++;
+        dataSize += d * d * 3 * sizeof(f32);
+        d /= 2;
+    }
+
+    *data = (f32*)realloc(*data, dataSize);
+
+    f32* rptr = *data;
+    f32* wptr = *data + size * size * 3;
+    u32 wctr = 0;
+    d = size;
+    for(u32 i = 1; i < mips; i++){
+        for(u32 y = 0; y < d; y += 2){
+            for(u32 x = 0; x < d; x += 2){
+                u32 i1 = y * d * 3 + x * 3;
+                u32 i2 = (y + 1) * d * 3 + x * 3;
+
+                f32 r1 = rptr[i1 + 0];
+                f32 g1 = rptr[i1 + 1];
+                f32 b1 = rptr[i1 + 2];
+
+                f32 r2 = rptr[i1 + 3];
+                f32 g2 = rptr[i1 + 4];
+                f32 b2 = rptr[i1 + 5];
+
+                f32 r3 = rptr[i2 + 0];
+                f32 g3 = rptr[i2 + 1];
+                f32 b3 = rptr[i2 + 2];
+
+                f32 r4 = rptr[i2 + 3];
+                f32 g4 = rptr[i2 + 4];
+                f32 b4 = rptr[i2 + 5];
+
+                f32 ra = (r1 + r2 + r3 + r4) * 0.25;
+                f32 ga = (g1 + g2 + g3 + g4) * 0.25;
+                f32 ba = (b1 + b2 + b3 + b4) * 0.25;
+
+                u32 widx = (y / 2) * d * 3 + (x / 2) * 3;
+
+                wptr[wctr++] = ra;
+                wptr[wctr++] = ga;
+                wptr[wctr++] = ba;
+            }
+        }
+        rptr += d * d * 3;
+        d /= 2;
+    }
+
+    *totalMips = mips;
+    *newDataSize = dataSize;
+}
+
 int main(int argc, char** argv){
     u32 w, h;
-    f32* dats = extractHDR("C:/Users/Dave/Desktop/posX.hdr", &w, &h);
+    f32* dats = extractHDR("C:/Users/Dave/Desktop/posx.hdr", &w, &h);
     u32 size = w * h * 3;
 
-    FILE* file = fopen("C:/Users/Dave/Desktop/sky.skybox_hdr", "wb");
+    u32 mips = 0;
+    u32 sizeWithMips = 0;
+    generateMipmaps(&dats, w, &mips, &sizeWithMips);
+
+    FILE* file = fopen("C:/Users/Dave/Desktop/code/skateboard/assets/textures/sky.skybox_hdr", "wb");
     fwrite(&w, sizeof(u32), 1, file);
     fwrite(&h, sizeof(u32), 1, file);
-    fwrite(dats, sizeof(f32), size, file);
+    fwrite(&mips, sizeof(u32), 1, file);
+    fwrite(dats, sizeof(u8), sizeWithMips, file);
     free(dats);
-    dats = extractHDR("C:/Users/Dave/Desktop/negX.hdr", &w, &h);
-    fwrite(dats, sizeof(f32), size, file);
+
+    dats = extractHDR("C:/Users/Dave/Desktop/negx.hdr", &w, &h);
+    generateMipmaps(&dats, w, &mips, &sizeWithMips);
+    fwrite(dats, sizeof(u8), sizeWithMips, file);
     free(dats);
-    dats = extractHDR("C:/Users/Dave/Desktop/posY.hdr", &w, &h);
-    fwrite(dats, sizeof(f32), size, file);
+
+    dats = extractHDR("C:/Users/Dave/Desktop/posy.hdr", &w, &h);
+    generateMipmaps(&dats, w, &mips, &sizeWithMips);
+    fwrite(dats, sizeof(u8), sizeWithMips, file);
     free(dats);
-    dats = extractHDR("C:/Users/Dave/Desktop/negY.hdr", &w, &h);
-    fwrite(dats, sizeof(f32), size, file);
+
+    dats = extractHDR("C:/Users/Dave/Desktop/negy.hdr", &w, &h);
+    generateMipmaps(&dats, w, &mips, &sizeWithMips);
+    fwrite(dats, sizeof(u8), sizeWithMips, file);
     free(dats);
-    dats = extractHDR("C:/Users/Dave/Desktop/posZ.hdr", &w, &h);
-    fwrite(dats, sizeof(f32), size, file);
+    dats = extractHDR("C:/Users/Dave/Desktop/posz.hdr", &w, &h);
+    generateMipmaps(&dats, w, &mips, &sizeWithMips);
+    fwrite(dats, sizeof(u8), sizeWithMips, file);
     free(dats);
-    dats = extractHDR("C:/Users/Dave/Desktop/negZ.hdr", &w, &h);
-    fwrite(dats, sizeof(f32), size, file);
+
+    dats = extractHDR("C:/Users/Dave/Desktop/negz.hdr", &w, &h);
+    generateMipmaps(&dats, w, &mips, &sizeWithMips);
+    fwrite(dats, sizeof(u8), sizeWithMips, file);
     free(dats);
+
+
     fclose(file);
 
     return 0;
